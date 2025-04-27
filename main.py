@@ -32,13 +32,15 @@ def predict():
     file = request.files['frame']
     npimg = np.frombuffer(file.read(), np.uint8)
     img = cv2.imdecode(npimg, cv2.IMREAD_COLOR)
+
+    img = cv2.flip(img, 1)  # 🔥 Flip horizontally here
+
     img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
     result = mp_hands.process(img_rgb)
 
     if not result.multi_hand_landmarks:
         return jsonify(letter="")
 
-    # Extract hand landmarks
     hand_landmarks = result.multi_hand_landmarks[0]
     xs = [lm.x for lm in hand_landmarks.landmark]
     ys = [lm.y for lm in hand_landmarks.landmark]

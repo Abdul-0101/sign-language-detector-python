@@ -9,8 +9,11 @@
 <body style="text-align:center; font-family:Arial;">
 
     <h1>🤟 Live Sign Language Detector</h1>
+    <p>
+  <a href="{{ url_for('inference-code') }}">View inference_classifier.py source</a>
+</p>
 
-    <video id="video" width="640" height="480" autoplay playsinline style="border: 1px solid black;"></video>
+<video id="video" width="640" height="480" autoplay playsinline style="border: 1px solid black;"></video>
     <canvas id="canvas" width="640" height="480" style="display:none;"></canvas>
 
     <h2>Detected Letter: <span id="output">-</span></h2>

@@ -11,3 +11,5 @@ imgaug>=0.4.0  # For data augmentation
 pyttsx3>=2.90
 gunicorn
 flask
+SpeechRecognition
+PyAudio

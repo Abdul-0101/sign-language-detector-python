@@ -1,85 +1,80 @@
-# main.py
-
-from flask import Flask, render_template, request, jsonify
-import pickle
-import os
+from flask import Flask, render_template, Response, redirect, url_for
 import cv2
-import mediapipe as mp
-import numpy as np
+from inference_classifier import predict, update_current_word, get_current_word, reset_current_word
 
-# 1. Create Flask app
 app = Flask(__name__)
+camera = cv2.VideoCapture(0)
 
-# 2. Load trained model
-with open('model.p', 'rb') as f:
-    model = pickle.load(f)['model']
-
-# 3. Load dictionary (optional for word prediction later)
-with open('dictionary.txt', 'r') as f:
-    DICTIONARY = set(line.strip().upper() for line in f)
-
-# 4. Initialize MediaPipe Hands
-mp_hands = mp.solutions.hands.Hands(static_image_mode=False, min_detection_confidence=0.9)
-
-# 5. Stability Control Variables
-stable_detection_threshold = 3  # How many frames before confirming a letter
-stable_count = 0
-last_detected_letter = ""
-current_confirmed_letter = ""
-
-# 6. Home page
 @app.route('/')
 def index():
+    # Main page: live feed + reset link + view source link
     return render_template('index.html')
 
-# 7. Prediction route
-@app.route('/predict', methods=['POST'])
-def predict():
-    global stable_count, last_detected_letter, current_confirmed_letter
+@app.route('/reset')
+def reset():
+    # Clear the current word buffer
+    reset_current_word()
+    return redirect(url_for('index'))
 
-    file = request.files['frame']
-    npimg = np.frombuffer(file.read(), np.uint8)
-    img = cv2.imdecode(npimg, cv2.IMREAD_COLOR)
+@app.route('/inference-code')
+def show_inference_code():
+    # Serve the full inference_classifier.py source as plain text
+    with open('inference_classifier.py', 'r') as f:
+        code = f.read()
+    return render_template('inference.html', code=code)
 
-    img = cv2.flip(img, 1)  # 🔥 This correctly flips the camera horizontally
+def generate_frames():
+    while True:
+        success, frame = camera.read()
+        if not success:
+            break
 
-    img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-    result = mp_hands.process(img_rgb)
+        # Run your full inference logic
+        letter, confidence, frame = predict(frame)
 
-    if not result.multi_hand_landmarks:
-        # No hand detected: reset stability counters
-        stable_count = 0
-        last_detected_letter = ""
-        return jsonify(letter="")
+        # Draw ROI
+        cv2.rectangle(frame, (100, 100), (300, 300), (255, 0, 0), 2)
 
-    # Extract landmarks
-    hand_landmarks = result.multi_hand_landmarks[0]
-    xs = [lm.x for lm in hand_landmarks.landmark]
-    ys = [lm.y for lm in hand_landmarks.landmark]
-    feature_vector = []
+        # Update and display letter if confident
+        if confidence > 0.7:
+            update_current_word(letter)
+            cv2.putText(
+                frame,
+                f"{letter} ({confidence*100:.1f}%)",
+                (100, 90),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                1, (0, 255, 0), 2
+            )
 
-    for lm in hand_landmarks.landmark:
-        feature_vector.append(lm.x - min(xs))
-        feature_vector.append(lm.y - min(ys))
+        # Overlay the cumulatively formed word
+        word = get_current_word()
+        cv2.putText(
+            frame,
+            f"Word: {word}",
+            (100, 350),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            1, (0, 0, 255), 2
+        )
 
-    feature_vector = np.asarray(feature_vector).reshape(1, -1)
-    prediction = model.predict(feature_vector)[0]
+        # JPEG-encode and stream
+        ret, jpeg = cv2.imencode('.jpg', frame)
+        if not ret:
+            continue
+        frame_bytes = jpeg.tobytes()
 
-    # Stability logic
-    if prediction == last_detected_letter:
-        stable_count += 1
-    else:
-        stable_count = 1
-        last_detected_letter = prediction
+        yield (
+            b'--frame\r\n'
+            b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n'
+        )
 
-    if stable_count >= stable_detection_threshold:
-        current_confirmed_letter = prediction
-    else:
-        current_confirmed_letter = ""
+@app.route('/video')
+def video():
+    # Video streaming route. Put this in your <img src="/video">
+    return Response(
+        generate_frames(),
+        mimetype='multipart/x-mixed-replace; boundary=frame'
+    )
 
-    return jsonify(letter=current_confirmed_letter)
-
-# 8. Start the server
-if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 5000))  # Required for Render deployment
-    app.run(host='0.0.0.0', port=port)
+if __name__ == "__main__":
+    # debug=True for development; turn off in production
+    app.run(host='0.0.0.0', port=5000, debug=True)

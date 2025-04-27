@@ -1,0 +1,57 @@
+<!-- templates/index.html -->
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Sign Language Detector</title>
+</head>
+<body style="text-align:center; font-family:Arial;">
+
+    <h1>🤟 Live Sign Language Detector</h1>
+
+    <video id="video" width="640" height="480" autoplay playsinline style="border: 1px solid black;"></video>
+    <canvas id="canvas" width="640" height="480" style="display:none;"></canvas>
+
+    <h2>Detected Letter: <span id="output">-</span></h2>
+
+    <script>
+        const video = document.getElementById('video');
+        const canvas = document.getElementById('canvas');
+        const output = document.getElementById('output');
+        const ctx = canvas.getContext('2d');
+
+        // Access webcam
+        navigator.mediaDevices.getUserMedia({ video: true })
+            .then(stream => {
+                video.srcObject = stream;
+            })
+            .catch(err => {
+                console.error("Error accessing webcam: ", err);
+            });
+
+        // Every 200ms, capture a frame and send to /predict
+        video.addEventListener('play', () => {
+            setInterval(async () => {
+                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                canvas.toBlob(async (blob) => {
+                    const formData = new FormData();
+                    formData.append('frame', blob, 'frame.jpg');
+
+                    try {
+                        const response = await fetch('/predict', {
+                            method: 'POST',
+                            body: formData
+                        });
+                        const data = await response.json();
+                        output.textContent = data.letter || "-";
+                    } catch (error) {
+                        console.error("Prediction error:", error);
+                    }
+                }, 'image/jpeg');
+            }, 200);
+        });
+    </script>
+
+</body>
+</html>

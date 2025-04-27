@@ -8,7 +8,7 @@ import os
 import tkinter as tk
 from tkinter import simpledialog
 import pyttsx3
-import speech_recognition as sr
+#import speech_recognition as sr
 
 # -------------------------------
 # Text-To-Speech (TTS) Setup

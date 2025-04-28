@@ -6,7 +6,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;700&display=swap" rel="stylesheet">
   <style>
     body { font-family: 'Poppins', sans-serif; text-align: center; background: #f0f2f5; margin-top: 20px; }
-    video { border: 3px solid #007bff; border-radius: 8px; }
+    video { border: 3px solid #007bff; border-radius: 8px; transform: scaleX(-1); } /* Flip video display only */
     button { margin: 5px; padding: 10px 20px; font-size: 18px; background: #007bff; border: none; color: white; border-radius: 8px; cursor: pointer; }
     button:hover { background: #0056b3; }
     input { margin: 10px; padding: 10px; width: 300px; font-size: 16px; border-radius: 8px; border: 1px solid #ccc; }
@@ -43,7 +43,6 @@
   <button onclick="correction()">✏ Correct</button>
 </div>
 
-<!-- Popup for Signs -->
 <div id="signPopup">
   <button onclick="hideSigns()">❌ Close</button><br><br>
   <img src="https://www.researchgate.net/publication/305110120/figure/fig1/AS:406942804660224@1474034133389/ndian-sign-language-dataset.png" alt="All Signs">
@@ -56,32 +55,21 @@ const ctx = canvas.getContext('2d');
 const letterSpan = document.getElementById('letter');
 const paragraphDiv = document.getElementById('paragraph');
 const predictionsDiv = document.getElementById('predictions');
-let canDetect = true; // ✅ Delay controller
 
 navigator.mediaDevices.getUserMedia({ video: true })
 .then(stream => { video.srcObject = stream; });
 
 video.addEventListener('play', () => {
   setInterval(async () => {
-    if (!canDetect) return; // ❌ Skip if waiting for delay
-
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-
     canvas.toBlob(async blob => {
       const form = new FormData();
       form.append('frame', blob, 'frame.jpg');
       const res = await fetch('/predict', { method: 'POST', body: form });
       const data = await res.json();
-      
-      if (data.letter) {
-        letterSpan.textContent = data.letter;
-        paragraphDiv.textContent = data.paragraph;
-        suggestWord(data.paragraph.split(' ').pop());
-
-        canDetect = false; // Block detection for next 5–10 seconds
-        const delay = 5000 + Math.random() * 5000; // 5 to 10 sec random
-        setTimeout(() => { canDetect = true; }, delay);
-      }
+      letterSpan.textContent = data.letter || '-';
+      paragraphDiv.textContent = data.paragraph || '-';
+      suggestWord(data.paragraph.split(' ').pop());
     }, 'image/jpeg');
   }, 300);
 });
@@ -116,6 +104,13 @@ function showSigns() {
 function hideSigns() {
   document.getElementById('signPopup').style.display = 'none';
 }
+
+// Keyboard keys working
+document.addEventListener('keydown', function(event) {
+  if (event.key === "Backspace") backspace();
+  if (event.key === " ") space();
+  if (event.key === "Enter") newline();
+});
 </script>
 
 </body>

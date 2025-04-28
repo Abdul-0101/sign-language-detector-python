@@ -1,61 +1,127 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Sign-Language Detector</title>
+  <title>Sign Language Detector 🎉</title>
   <style>
-    /* ... your existing styles ... */
-    video {
-      width: 480px;
-      height: 360px;
-      transform: scaleX(-1); /* mirror */
-      border: 4px solid #333;
+    body {
+      text-align: center;
+      font-family: 'Comic Sans MS', cursive, sans-serif;
+      background: #fffcf9;
+      margin-top: 20px;
+      animation: pop 1s ease-in-out infinite alternate;
+    }
+    button {
+      margin: 5px;
+      padding: 10px 20px;
+      font-size: 18px;
+      background: #ff69b4;
+      border: none;
+      border-radius: 10px;
+      cursor: pointer;
+    }
+    input {
+      margin: 10px;
+      padding: 8px;
+      font-size: 16px;
+      width: 300px;
+    }
+    h1, h2, h3 {
+      color: #ff1493;
+    }
+    #predictions {
+      margin: 10px;
+      font-weight: bold;
+    }
+    @keyframes pop {
+      0% { transform: scale(1);}
+      100% { transform: scale(1.03);}
     }
   </style>
 </head>
 <body>
-  <!-- ... heading, output div, inputs/buttons ... -->
 
-  <!-- 1) Browser webcam capture -->
-  <video id="video" autoplay playsinline></video>
-  <canvas id="canvas" width="480" height="360" style="display:none"></canvas>
+<h1>🤟 Funky Live Sign Language Detector</h1>
 
-  <!-- ... your input and buttons ... -->
+<video id="video" width="640" height="480" autoplay playsinline style="border:2px dashed #ff1493;"></video>
+<canvas id="canvas" width="640" height="480" style="display:none;"></canvas>
 
-  <script src="{{ url_for('static', filename='inference_classifier.js') }}"></script>
-  <script>
-    const video = document.getElementById('video');
-    const canvas = document.getElementById('canvas');
-    const ctx = canvas.getContext('2d');
+<h2>Detected Letter: <span id="letter">-</span></h2>
+<h3>Forming Word: <span id="word">-</span></h3>
 
-    // Start the webcam
-    navigator.mediaDevices.getUserMedia({ video: true })
-      .then(stream => { video.srcObject = stream; })
-      .catch(err => { console.error('Webcam error:', err); });
+<div id="predictions"></div>
 
-    // Main loop: grab frame, send to /predict, update UI
-    function loop() {
-      if (video.readyState === video.HAVE_ENOUGH_DATA) {
-        // Draw mirrored frame to canvas
-        ctx.save();
-        ctx.scale(-1, 1);
-        ctx.drawImage(video, -canvas.width, 0, canvas.width, canvas.height);
-        ctx.restore();
+<div>
+  <button onclick="backspace()">⌫</button>
+  <button onclick="space()">➡</button>
+  <button onclick="newline()">↵</button>
+  <button onclick="speak()">🔈 Speak</button>
+  <button onclick="clearAll()">🧹 Clear All</button>
+</div>
 
-        const dataURL = canvas.toDataURL('image/jpeg');
-        inference_classifier.predict(dataURL).then(label => {
-          outputEl.textContent = `Detected: ${label}`;
-          updateSuggestion(label);
-        });
-      }
-      requestAnimationFrame(loop);
-    }
+<div>
+  <input id="corrected" placeholder="Correct manually...">
+  <button onclick="correction()">✏ Correct</button>
+</div>
 
-    video.addEventListener('loadeddata', () => {
-      loop();
-    });
+<script>
+const video = document.getElementById('video');
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+const letterSpan = document.getElementById('letter');
+const wordSpan = document.getElementById('word');
+const predictionsDiv = document.getElementById('predictions');
 
-    // ... rest of your existing JS (autocomplete, buttons, keys) ...
-  </script>
+navigator.mediaDevices.getUserMedia({ video: true })
+.then(stream => { video.srcObject = stream; });
+
+video.addEventListener('play', () => {
+  setInterval(async () => {
+    ctx.save();
+    ctx.scale(-1, 1);
+    ctx.drawImage(video, -canvas.width, 0, canvas.width, canvas.height);
+    ctx.restore();
+    canvas.toBlob(async blob => {
+      const form = new FormData();
+      form.append('frame', blob, 'frame.jpg');
+      const res = await fetch('/predict', { method: 'POST', body: form });
+      const data = await res.json();
+      letterSpan.textContent = data.letter || '-';
+      wordSpan.textContent = data.word || '-';
+      suggestWord(data.word);
+    }, 'image/jpeg');
+  }, 300);
+});
+
+async function suggestWord(partial) {
+  if (!partial) return;
+  const res = await fetch(`/predict_word?partial=${partial}`);
+  const data = await res.json();
+  predictionsDiv.innerHTML = data.predictions.map(w => `<button onclick="appendPrediction('${w}')">${w}</button>`).join(' ');
+}
+
+function appendPrediction(word) {
+  document.getElementById('corrected').value = word;
+  correction();
+}
+
+function backspace() { fetch('/backspace', { method: 'POST' }).then(r => r.json()).then(d => wordSpan.textContent = d.word); }
+function space() { fetch('/space', { method: 'POST' }).then(r => r.json()).then(d => wordSpan.textContent = d.word); }
+function newline() { fetch('/newline', { method: 'POST' }).then(r => r.json()).then(d => wordSpan.textContent = d.word); }
+function speak() {
+  fetch('/speak').then(r => r.json()).then(d => {
+    const audio = new Audio('data:audio/mpeg;base64,' + d.audio);
+    audio.play();
+  });
+}
+function clearAll() { fetch('/clear', { method: 'POST' }).then(r => r.json()).then(d => wordSpan.textContent = d.word); }
+function correction() {
+  const corrected = document.getElementById('corrected').value;
+  const form = new FormData();
+  form.append('corrected', corrected);
+  fetch('/correction', { method: 'POST', body: form }).then(r => r.json()).then(d => wordSpan.textContent = d.word);
+}
+</script>
+
 </body>
 </html>

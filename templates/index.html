@@ -2,61 +2,41 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Sign Language Detector 🎉</title>
+  <title>Sign Language Live Translator</title>
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;700&display=swap" rel="stylesheet">
   <style>
-    body {
-      text-align: center;
-      font-family: 'Comic Sans MS', cursive, sans-serif;
-      background: #fffcf9;
-      margin-top: 20px;
-      animation: pop 1s ease-in-out infinite alternate;
-    }
-    button {
-      margin: 5px;
-      padding: 10px 20px;
-      font-size: 18px;
-      background: #ff69b4;
-      border: none;
-      border-radius: 10px;
-      cursor: pointer;
-    }
-    input {
-      margin: 10px;
-      padding: 8px;
-      font-size: 16px;
-      width: 300px;
-    }
-    h1, h2, h3 {
-      color: #ff1493;
-    }
-    #predictions {
-      margin: 10px;
-      font-weight: bold;
-    }
-    @keyframes pop {
-      0% { transform: scale(1);}
-      100% { transform: scale(1.03);}
-    }
+    body { font-family: 'Poppins', sans-serif; text-align: center; background: #f0f2f5; margin-top: 20px; }
+    video { border: 3px solid #007bff; border-radius: 8px; }
+    button { margin: 5px; padding: 10px 20px; font-size: 18px; background: #007bff; border: none; color: white; border-radius: 8px; cursor: pointer; }
+    button:hover { background: #0056b3; }
+    #predictions button { background: #6f42c1; }
+    input { margin: 10px; padding: 10px; width: 300px; font-size: 16px; border-radius: 8px; border: 1px solid #ccc; }
+    #signPopup { display:none; position:fixed; top:10%; left:10%; width:80%; height:80%; background:white; border:2px solid #007bff; overflow:auto; border-radius:10px; padding:20px;}
+    #signPopup img { width:80px; margin:10px; }
+    h1 { color: #333; margin-bottom: 10px; }
+    h2 { margin-top: 10px; }
   </style>
 </head>
 <body>
 
-<h1>🤟 Funky Live Sign Language Detector</h1>
+<h1>🤟 Sign Language Live Translator</h1>
 
-<video id="video" width="640" height="480" autoplay playsinline style="border:2px dashed #ff1493;"></video>
+<video id="video" width="640" height="480" autoplay playsinline></video>
 <canvas id="canvas" width="640" height="480" style="display:none;"></canvas>
 
 <h2>Detected Letter: <span id="letter">-</span></h2>
-<h3>Forming Word: <span id="word">-</span></h3>
+<h2>Full Paragraph:</h2>
+<div id="paragraph" style="white-space: pre-wrap; font-size:20px;"></div>
 
 <div id="predictions"></div>
 
 <div>
   <button onclick="backspace()">⌫</button>
-  <button onclick="space()">➡</button>
-  <button onclick="newline()">↵</button>
+  <button onclick="space()">Space ➡</button>
+  <button onclick="newline()">New Line ↵</button>
   <button onclick="speak()">🔈 Speak</button>
   <button onclick="clearAll()">🧹 Clear All</button>
+  <button onclick="showSigns()">📚 All Signs</button>
 </div>
 
 <div>
@@ -64,12 +44,18 @@
   <button onclick="correction()">✏ Correct</button>
 </div>
 
+<div id="signPopup">
+  <button onclick="hideSigns()">❌ Close</button><br><br>
+  <!-- A-Z Sign images -->
+  <div id="signImages"></div>
+</div>
+
 <script>
 const video = document.getElementById('video');
 const canvas = document.getElementById('canvas');
 const ctx = canvas.getContext('2d');
 const letterSpan = document.getElementById('letter');
-const wordSpan = document.getElementById('word');
+const paragraphDiv = document.getElementById('paragraph');
 const predictionsDiv = document.getElementById('predictions');
 
 navigator.mediaDevices.getUserMedia({ video: true })
@@ -79,7 +65,7 @@ video.addEventListener('play', () => {
   setInterval(async () => {
     ctx.save();
     ctx.scale(-1, 1);
-    ctx.drawImage(video, -canvas.width, 0, canvas.width, canvas.height);
+    ctx.drawImage(video, -canvas.width, 0, canvas.height);
     ctx.restore();
     canvas.toBlob(async blob => {
       const form = new FormData();
@@ -87,8 +73,8 @@ video.addEventListener('play', () => {
       const res = await fetch('/predict', { method: 'POST', body: form });
       const data = await res.json();
       letterSpan.textContent = data.letter || '-';
-      wordSpan.textContent = data.word || '-';
-      suggestWord(data.word);
+      paragraphDiv.textContent = data.paragraph || '-';
+      suggestWord(data.paragraph.split(' ').pop());
     }, 'image/jpeg');
   }, 300);
 });
@@ -105,22 +91,31 @@ function appendPrediction(word) {
   correction();
 }
 
-function backspace() { fetch('/backspace', { method: 'POST' }).then(r => r.json()).then(d => wordSpan.textContent = d.word); }
-function space() { fetch('/space', { method: 'POST' }).then(r => r.json()).then(d => wordSpan.textContent = d.word); }
-function newline() { fetch('/newline', { method: 'POST' }).then(r => r.json()).then(d => wordSpan.textContent = d.word); }
-function speak() {
-  fetch('/speak').then(r => r.json()).then(d => {
-    const audio = new Audio('data:audio/mpeg;base64,' + d.audio);
-    audio.play();
-  });
-}
-function clearAll() { fetch('/clear', { method: 'POST' }).then(r => r.json()).then(d => wordSpan.textContent = d.word); }
+function backspace() { fetch('/backspace', { method: 'POST' }).then(r => r.json()).then(d => paragraphDiv.textContent = d.paragraph); }
+function space() { fetch('/space', { method: 'POST' }).then(r => r.json()).then(d => paragraphDiv.textContent = d.paragraph); }
+function newline() { fetch('/newline', { method: 'POST' }).then(r => r.json()).then(d => paragraphDiv.textContent = d.paragraph); }
+function clearAll() { fetch('/clear', { method: 'POST' }).then(r => r.json()).then(d => paragraphDiv.textContent = d.paragraph); }
+function speak() { fetch('/speak').then(r => r.json()).then(d => { const audio = new Audio('data:audio/mpeg;base64,' + d.audio); audio.play(); }); }
 function correction() {
   const corrected = document.getElementById('corrected').value;
   const form = new FormData();
   form.append('corrected', corrected);
-  fetch('/correction', { method: 'POST', body: form }).then(r => r.json()).then(d => wordSpan.textContent = d.word);
+  fetch('/correction', { method: 'POST', body: form }).then(r => r.json()).then(d => paragraphDiv.textContent = d.paragraph);
 }
+
+function showSigns() {
+  document.getElementById('signPopup').style.display = 'block';
+}
+function hideSigns() {
+  document.getElementById('signPopup').style.display = 'none';
+}
+
+const signs = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
+signs.forEach(letter => {
+  const img = document.createElement('img');
+  img.src = `https://www.signasl.org/images/asl_alphabet/${letter}.png`;
+  document.getElementById('signImages').appendChild(img);
+});
 </script>
 
 </body>

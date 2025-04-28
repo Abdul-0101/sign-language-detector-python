@@ -11,4 +11,3 @@
  gunicorn
  flask
  gTTS
- playsound

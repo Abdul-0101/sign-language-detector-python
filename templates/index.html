@@ -1,34 +1,74 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="utf-8">
+<head>
+    <meta charset="UTF-8">
     <title>Sign Language Detector</title>
-  </head>
-  <body>
-    <h1>Sign Language Detector</h1>
+    <style>
+        body { text-align: center; font-family: Arial; background: #f9f9f9; margin-top: 20px; }
+        button { margin: 5px; padding: 10px 20px; font-size: 16px; }
+        input { margin: 10px; padding: 8px; width: 300px; }
+        h1 { margin-bottom: 10px; }
+    </style>
+</head>
+<body>
 
-    <!-- Live camera feed -->
-    <img src="{{ url_for('video') }}" width="600" />
+    <h1>🤟 Live Sign Language Detector</h1>
 
-    <!-- Auto‐playing TTS -->
-    <audio id="tts_player" autoplay>
-      <source src="{{ url_for('static', filename='tts.mp3') }}" type="audio/mpeg">
-    </audio>
+    <video id="video" width="640" height="480" autoplay playsinline style="border:1px solid #333;"></video>
+    <canvas id="canvas" width="640" height="480" style="display:none;"></canvas>
 
-    <!-- Controls -->
-    <div style="margin-top:20px;">
-      <a href="{{ url_for('reset') }}">🔄 Reset Word</a> |
-      <a href="{{ url_for('inference-code') }}">📄 View Inference Code</a>
+    <h2>Detected Letter: <span id="letter">-</span></h2>
+    <h2>Forming Word: <span id="word">-</span></h2>
+
+    <div>
+        <button onclick="backspace()">⌫ Backspace</button>
+        <button onclick="space()">➡ Space</button>
+        <button onclick="newline()">↵ New Line</button>
+        <button onclick="speak()">🔈 Speak</button>
     </div>
-  </body>
-  <script>
-    // Whenever the video frame reloads, reload the audio too (cache‐bust)
-    const img = document.querySelector('img');
-    const audio = document.getElementById('tts_player');
-    img.addEventListener('load', () => {
-      const src = audio.querySelector('source');
-      src.src = src.src.split('?')[0] + '?t=' + Date.now();
-      audio.load();
-    });
-  </script>
+
+    <div>
+        <input id="corrected" placeholder="Enter corrected word...">
+        <button onclick="correction()">✏ Correct</button>
+    </div>
+
+    <script>
+        const video = document.getElementById('video');
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const letterSpan = document.getElementById('letter');
+        const wordSpan = document.getElementById('word');
+
+        navigator.mediaDevices.getUserMedia({ video: true })
+            .then(stream => { video.srcObject = stream; });
+
+        video.addEventListener('play', () => {
+            setInterval(async () => {
+                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                canvas.toBlob(async blob => {
+                    let form = new FormData();
+                    form.append('frame', blob, 'frame.jpg');
+                    const res = await fetch('/predict', { method: 'POST', body: form });
+                    const data = await res.json();
+                    letterSpan.textContent = data.letter || '-';
+                    wordSpan.textContent = data.word || '-';
+                }, 'image/jpeg');
+            }, 250);
+        });
+
+        function backspace() { fetch('/backspace', { method: 'POST' }).then(r => r.json()).then(d => wordSpan.textContent = d.word); }
+        function space() { fetch('/space', { method: 'POST' }).then(r => r.json()).then(d => wordSpan.textContent = d.word); }
+        function newline() { fetch('/newline', { method: 'POST' }).then(r => r.json()).then(d => wordSpan.textContent = d.word); }
+        function speak() { window.open('/speak', '_blank'); }
+        function correction() {
+            const corrected = document.getElementById('corrected').value;
+            const form = new FormData();
+            form.append('corrected', corrected);
+            fetch('/correction', { method: 'POST', body: form })
+                .then(r => r.json())
+                .then(d => wordSpan.textContent = d.word);
+        }
+    </script>
+
+</body>
 </html>

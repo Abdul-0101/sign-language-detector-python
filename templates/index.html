@@ -9,10 +9,9 @@
     video { border: 3px solid #007bff; border-radius: 8px; }
     button { margin: 5px; padding: 10px 20px; font-size: 18px; background: #007bff; border: none; color: white; border-radius: 8px; cursor: pointer; }
     button:hover { background: #0056b3; }
-    #predictions button { background: #6f42c1; }
     input { margin: 10px; padding: 10px; width: 300px; font-size: 16px; border-radius: 8px; border: 1px solid #ccc; }
     #signPopup { display:none; position:fixed; top:10%; left:10%; width:80%; height:80%; background:white; border:2px solid #007bff; overflow:auto; border-radius:10px; padding:20px;}
-    #signPopup img { width:80px; margin:10px; }
+    #signPopup img { width:90%; max-width:800px; margin: 10px auto; }
     h1 { color: #333; margin-bottom: 10px; }
     h2 { margin-top: 10px; }
   </style>
@@ -44,12 +43,10 @@
   <button onclick="correction()">✏ Correct</button>
 </div>
 
+<!-- Popup for Signs -->
 <div id="signPopup">
   <button onclick="hideSigns()">❌ Close</button><br><br>
-  <!-- A-Z Sign images -->
-  <div id="signImages">
-  <img src="https://www.researchgate.net/publication/305110120/figure/fig1/AS:406942804660224@1474034133389/ndian-sign-language-dataset.png" style="width:90%; max-width:800px;">
-</div>
+  <img src="https://www.researchgate.net/publication/305110120/figure/fig1/AS:406942804660224@1474034133389/ndian-sign-language-dataset.png" alt="All Signs">
 </div>
 
 <script>
@@ -59,24 +56,32 @@ const ctx = canvas.getContext('2d');
 const letterSpan = document.getElementById('letter');
 const paragraphDiv = document.getElementById('paragraph');
 const predictionsDiv = document.getElementById('predictions');
+let canDetect = true; // ✅ Delay controller
 
 navigator.mediaDevices.getUserMedia({ video: true })
 .then(stream => { video.srcObject = stream; });
 
 video.addEventListener('play', () => {
   setInterval(async () => {
-    ctx.save();
-    ctx.scale(-1, 1);
-    ctx.drawImage(video, -canvas.width, 0, canvas.height);
-    ctx.restore();
+    if (!canDetect) return; // ❌ Skip if waiting for delay
+
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
     canvas.toBlob(async blob => {
       const form = new FormData();
       form.append('frame', blob, 'frame.jpg');
       const res = await fetch('/predict', { method: 'POST', body: form });
       const data = await res.json();
-      letterSpan.textContent = data.letter || '-';
-      paragraphDiv.textContent = data.paragraph || '-';
-      suggestWord(data.paragraph.split(' ').pop());
+      
+      if (data.letter) {
+        letterSpan.textContent = data.letter;
+        paragraphDiv.textContent = data.paragraph;
+        suggestWord(data.paragraph.split(' ').pop());
+
+        canDetect = false; // Block detection for next 5–10 seconds
+        const delay = 5000 + Math.random() * 5000; // 5 to 10 sec random
+        setTimeout(() => { canDetect = true; }, delay);
+      }
     }, 'image/jpeg');
   }, 300);
 });
@@ -111,13 +116,6 @@ function showSigns() {
 function hideSigns() {
   document.getElementById('signPopup').style.display = 'none';
 }
-
-const signs = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
-signs.forEach(letter => {
-  const img = document.createElement('img');
-  img.src = `https://www.signasl.org/images/asl_alphabet/${letter}.png`;
-  document.getElementById('signImages').appendChild(img);
-});
 </script>
 
 </body>

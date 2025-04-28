@@ -1,112 +1,62 @@
-from flask import Flask, render_template, request, jsonify, send_file
-import pickle
-import os
+from flask import Flask, render_template, Response, request, jsonify
 import cv2
-import mediapipe as mp
+import base64
 import numpy as np
-from gtts import gTTS
-import io
+import inference_classifier  # your existing Python inference module
 
-app = Flask(__name__)
+app = Flask(__name__,
+            static_folder='static',        # serve JS, dictionary.txt here
+            template_folder='templates')   # your index.html lives here
 
-# Load model
-with open('model.p', 'rb') as f:
-    model = pickle.load(f)['model']
-
-# Load dictionary
-with open('dictionary.txt', 'r') as f:
-    DICTIONARY = set(line.strip().upper() for line in f)
-
-# MediaPipe Hands initialization
-mp_hands = mp.solutions.hands.Hands(static_image_mode=False, min_detection_confidence=0.9)
-
-# Stability Control Variables
-stable_detection_threshold = 3
-stable_count = 0
-last_detected_letter = ""
-current_confirmed_letter = ""
-forming_word = ""
+# Open the default camera
+cap = cv2.VideoCapture(0)
 
 @app.route('/')
 def index():
+    """Serve the main page."""
     return render_template('index.html')
 
+def gen_frames():
+    """Generator that yields camera frames as multipart MJPEG."""
+    while True:
+        success, frame = cap.read()
+        if not success:
+            break
+        # encode frame as JPEG
+        ret, buffer = cv2.imencode('.jpg', frame)
+        frame_bytes = buffer.tobytes()
+        yield (
+            b'--frame\r\n'
+            b'Content-Type: image/jpeg\r\n\r\n' +
+            frame_bytes +
+            b'\r\n'
+        )
+
+@app.route('/video_feed')
+def video_feed():
+    """Video streaming route. Put this in an <img> src."""
+    return Response(
+        gen_frames(),
+        mimetype='multipart/x-mixed-replace; boundary=frame'
+    )
+
 @app.route('/predict', methods=['POST'])
-def predict():
-    global stable_count, last_detected_letter, current_confirmed_letter, forming_word
-
-    file = request.files['frame']
-    npimg = np.frombuffer(file.read(), np.uint8)
-    img = cv2.imdecode(npimg, cv2.IMREAD_COLOR)
-    img = cv2.flip(img, 1)  # Correct flip
-
-    img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-    result = mp_hands.process(img_rgb)
-
-    if not result.multi_hand_landmarks:
-        stable_count = 0
-        last_detected_letter = ""
-        return jsonify(letter="", word=forming_word)
-
-    hand_landmarks = result.multi_hand_landmarks[0]
-    xs = [lm.x for lm in hand_landmarks.landmark]
-    ys = [lm.y for lm in hand_landmarks.landmark]
-    feature_vector = []
-
-    for lm in hand_landmarks.landmark:
-        feature_vector.append(lm.x - min(xs))
-        feature_vector.append(lm.y - min(ys))
-
-    feature_vector = np.asarray(feature_vector).reshape(1, -1)
-    prediction = model.predict(feature_vector)[0]
-
-    # Stability logic
-    if prediction == last_detected_letter:
-        stable_count += 1
-    else:
-        stable_count = 1
-        last_detected_letter = prediction
-
-    if stable_count >= stable_detection_threshold:
-        current_confirmed_letter = prediction
-        forming_word += prediction
-        stable_count = 0
-
-    return jsonify(letter=current_confirmed_letter, word=forming_word)
-
-@app.route('/backspace', methods=['POST'])
-def backspace():
-    global forming_word
-    forming_word = forming_word[:-1]
-    return jsonify(word=forming_word)
-
-@app.route('/space', methods=['POST'])
-def space():
-    global forming_word
-    forming_word += ' '
-    return jsonify(word=forming_word)
-
-@app.route('/newline', methods=['POST'])
-def newline():
-    global forming_word
-    forming_word += '\n'
-    return jsonify(word=forming_word)
-
-@app.route('/correction', methods=['POST'])
-def correction():
-    global forming_word
-    corrected = request.form.get('corrected', '')
-    forming_word = corrected
-    return jsonify(word=forming_word)
-
-@app.route('/speak', methods=['GET'])
-def speak():
-    tts = gTTS(text=forming_word, lang='en')
-    mp3_fp = io.BytesIO()
-    tts.write_to_fp(mp3_fp)
-    mp3_fp.seek(0)
-    return send_file(mp3_fp, mimetype="audio/mpeg")
+def predict_route():
+    """
+    Receive a base64-encoded JPEG frame from the client,
+    run your Python classifier on it, and return the label.
+    """
+    data = request.get_json(force=True)
+    # data['image'] is like "data:image/jpeg;base64,/9j/4AAQ..."
+    img_b64 = data.get('image', '').split(',', 1)[1]
+    img_bytes = base64.b64decode(img_b64)
+    # convert bytes to OpenCV image
+    arr = np.frombuffer(img_bytes, dtype=np.uint8)
+    frame = cv2.imdecode(arr, flags=cv2.IMREAD_COLOR)
+    # call your existing classifier
+    label = inference_classifier.predict(frame)
+    return jsonify(label=label)
 
 if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port)
+    # start Flask app
+    app.run(host='0.0.0.0', port=5000, threaded=True)

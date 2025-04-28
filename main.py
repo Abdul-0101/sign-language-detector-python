@@ -1,44 +1,22 @@
-from flask import Flask, render_template, Response, request, jsonify
-import cv2
+# main.py
+from flask import Flask, render_template, request, jsonify
 import base64
 import numpy as np
-import inference_classifier  # your existing Python inference module
+import cv2
+import pickle
 
 app = Flask(__name__,
-            static_folder='static',        # serve JS, dictionary.txt here
-            template_folder='templates')   # your index.html lives here
+            static_folder='static',
+            template_folder='templates')
 
-# Open the default camera
-cap = cv2.VideoCapture(0)
+# Load your trained model once
+with open('model.p', 'rb') as f:
+    model = pickle.load(f)
 
 @app.route('/')
 def index():
-    """Serve the main page."""
+    """Serve the main page with browser-based webcam capture."""
     return render_template('index.html')
-
-def gen_frames():
-    """Generator that yields camera frames as multipart MJPEG."""
-    while True:
-        success, frame = cap.read()
-        if not success:
-            break
-        # encode frame as JPEG
-        ret, buffer = cv2.imencode('.jpg', frame)
-        frame_bytes = buffer.tobytes()
-        yield (
-            b'--frame\r\n'
-            b'Content-Type: image/jpeg\r\n\r\n' +
-            frame_bytes +
-            b'\r\n'
-        )
-
-@app.route('/video_feed')
-def video_feed():
-    """Video streaming route. Put this in an <img> src."""
-    return Response(
-        gen_frames(),
-        mimetype='multipart/x-mixed-replace; boundary=frame'
-    )
 
 @app.route('/predict', methods=['POST'])
 def predict_route():
@@ -47,16 +25,27 @@ def predict_route():
     run your Python classifier on it, and return the label.
     """
     data = request.get_json(force=True)
-    # data['image'] is like "data:image/jpeg;base64,/9j/4AAQ..."
     img_b64 = data.get('image', '').split(',', 1)[1]
     img_bytes = base64.b64decode(img_b64)
-    # convert bytes to OpenCV image
     arr = np.frombuffer(img_bytes, dtype=np.uint8)
     frame = cv2.imdecode(arr, flags=cv2.IMREAD_COLOR)
-    # call your existing classifier
-    label = inference_classifier.predict(frame)
-    return jsonify(label=label)
+
+    # Your inference logic, identical to inference_classifier.py
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    _, thresh = cv2.threshold(gray, 127, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+    contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    if not contours:
+        return jsonify(label="")
+    cnt = max(contours, key=cv2.contourArea)
+    x, y, w, h = cv2.boundingRect(cnt)
+    if w < 10 or h < 10:
+        return jsonify(label="")
+    roi = thresh[y:y+h, x:x+w]
+    roi_resized = cv2.resize(roi, (28, 28), interpolation=cv2.INTER_AREA)
+    roi_flat = roi_resized.flatten().reshape(1, -1).astype(np.float32) / 255.0
+    label = model.predict(roi_flat)[0]
+
+    return jsonify(label=str(label))
 
 if __name__ == '__main__':
-    # start Flask app
     app.run(host='0.0.0.0', port=5000, threaded=True)

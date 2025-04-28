@@ -4,174 +4,58 @@
   <meta charset="UTF-8">
   <title>Sign-Language Detector</title>
   <style>
-    body {
-      font-family: sans-serif;
-      background: #f0f8ff;
-      text-align: center;
-      margin: 0; padding: 1em;
-    }
-    #video {
-      width: 480px; height: 360px;
+    /* ... your existing styles ... */
+    video {
+      width: 480px;
+      height: 360px;
+      transform: scaleX(-1); /* mirror */
       border: 4px solid #333;
-      transform: scaleX(-1); /* mirror! */
-    }
-    #canvas {
-      display: none;
-    }
-    #output {
-      margin-top: 1em;
-      font-size: 1.5em;
-      min-height: 1.2em;
-    }
-    #text-input {
-      width: 80%; font-size: 1.2em;
-      padding: 0.5em;
-      border: 2px solid #444;
-      border-radius: 5px;
-    }
-    #suggestion {
-      color: #888;
-      margin-left: 0.5em;
-      font-style: italic;
-    }
-    button {
-      font-size: 1em;
-      padding: 0.5em 1em;
-      margin: 0.5em;
-      cursor: pointer;
-      border-radius: 4px;
-    }
-    button:active {
-      transform: scale(0.98);
-    }
-    .fun {
-      animation: bounce 1s infinite alternate;
-      display: inline-block;
-    }
-    @keyframes bounce {
-      to { transform: translateY(-5px); }
     }
   </style>
 </head>
 <body>
+  <!-- ... heading, output div, inputs/buttons ... -->
 
-  <h1 class="fun">🤟 Sign-Language Detector 🤟</h1>
+  <!-- 1) Browser webcam capture -->
+  <video id="video" autoplay playsinline></video>
+  <canvas id="canvas" width="480" height="360" style="display:none"></canvas>
 
-  <!-- mirrored video feed -->
-  <img id="video" src="{{ url_for('video_feed') }}" alt="camera feed"/>
+  <!-- ... your input and buttons ... -->
 
-  <div id="output">🕵️‍♂️ Waiting for gesture...</div>
-
-  <input type="text" id="text-input" placeholder="Type or let me predict...">
-  <span id="suggestion"></span>
-  <br>
-
-  <button id="append-btn">➕ Append</button>
-  <button id="clear-btn">🗑️ Clear</button>
-  <button id="speak-btn">🔊 Speak</button>
-
-  <canvas id="canvas" width="480" height="360"></canvas>
-
+  <script src="{{ url_for('static', filename='inference_classifier.js') }}"></script>
   <script>
-    // --- model setup (reuse your existing inference code) ---
-    // Suppose inference_classifier.predict(frame) returns a string.
-    // You may need to adapt this if your function signature differs.
-    const predict = inference_classifier.predict;
-
-    const videoImg = document.getElementById('video');
+    const video = document.getElementById('video');
     const canvas = document.getElementById('canvas');
     const ctx = canvas.getContext('2d');
-    const outputEl = document.getElementById('output');
-    const textInput = document.getElementById('text-input');
-    const suggestionEl = document.getElementById('suggestion');
-    const appendBtn = document.getElementById('append-btn');
-    const clearBtn = document.getElementById('clear-btn');
-    const speakBtn = document.getElementById('speak-btn');
 
-    // --- load dictionary for autocomplete ---
-    let dict = [];
-    fetch('/static/dictionary.txt')
-      .then(resp => resp.text())
-      .then(txt => { dict = txt.split(/\r?\n/); });
+    // Start the webcam
+    navigator.mediaDevices.getUserMedia({ video: true })
+      .then(stream => { video.srcObject = stream; })
+      .catch(err => { console.error('Webcam error:', err); });
 
-    // --- continuously grab frames & predict ---
+    // Main loop: grab frame, send to /predict, update UI
     function loop() {
-      // draw mirrored onto canvas
-      ctx.save();
-      ctx.scale(-1, 1);
-      ctx.drawImage(videoImg, -canvas.width, 0, canvas.width, canvas.height);
-      ctx.restore();
+      if (video.readyState === video.HAVE_ENOUGH_DATA) {
+        // Draw mirrored frame to canvas
+        ctx.save();
+        ctx.scale(-1, 1);
+        ctx.drawImage(video, -canvas.width, 0, canvas.width, canvas.height);
+        ctx.restore();
 
-      // get image data & predict
-      const imgData = canvas.toDataURL('image/jpeg');
-      // YOUR custom inference call here:
-      predict(imgData).then(label => {
-        outputEl.textContent = `Detected: ${label}`;
-        // also offer label as autocomplete seed:
-        updateSuggestion(label);
-      });
-
+        const dataURL = canvas.toDataURL('image/jpeg');
+        inference_classifier.predict(dataURL).then(label => {
+          outputEl.textContent = `Detected: ${label}`;
+          updateSuggestion(label);
+        });
+      }
       requestAnimationFrame(loop);
     }
-    videoImg.onload = () => { loop(); };
 
-    // --- autocomplete suggestion ---
-    let currentSuggestion = '';
-    function updateSuggestion(prefix) {
-      const word = textInput.value.split(/\s+/).pop().toLowerCase();
-      if (!word) {
-        suggestionEl.textContent = '';
-        currentSuggestion = '';
-        return;
-      }
-      // find first dict entry starting with `word` OR prefix from detection
-      const search = prefix.toLowerCase() || word;
-      const match = dict.find(w => w.toLowerCase().startsWith(search));
-      if (match && match.toLowerCase() !== word) {
-        currentSuggestion = match;
-        suggestionEl.textContent = match.slice(word.length);
-      } else {
-        suggestionEl.textContent = '';
-        currentSuggestion = '';
-      }
-    }
-
-    // --- key bindings ---
-    textInput.addEventListener('input', () => updateSuggestion(''));
-    textInput.addEventListener('keydown', e => {
-      // Tab or ArrowRight to accept suggestion
-      if ((e.key === 'Tab' || e.key === 'ArrowRight') && currentSuggestion) {
-        e.preventDefault();
-        textInput.value = textInput.value.replace(/\w+$/,'') + currentSuggestion + ' ';
-        suggestionEl.textContent = '';
-        currentSuggestion = '';
-      }
-    });
-    // global Backspace to clear last word
-    document.addEventListener('keydown', e => {
-      if (e.key === 'Backspace' && document.activeElement !== textInput) {
-        e.preventDefault();
-        textInput.value = textInput.value.replace(/\s*\S+\s*$/, '');
-        updateSuggestion('');
-      }
+    video.addEventListener('loadeddata', () => {
+      loop();
     });
 
-    // --- buttons ---
-    appendBtn.addEventListener('click', () => {
-      textInput.value += (outputEl.textContent.replace('Detected: ', '') + ' ');
-      updateSuggestion('');
-    });
-    clearBtn.addEventListener('click', () => {
-      textInput.value = '';
-      updateSuggestion('');
-    });
-    speakBtn.addEventListener('click', () => {
-      const msg = new SpeechSynthesisUtterance(textInput.value);
-      window.speechSynthesis.speak(msg);
-    });
+    // ... rest of your existing JS (autocomplete, buttons, keys) ...
   </script>
-
-  <!-- import your inference JS: -->
-  <script src="{{ url_for('static', filename='inference_classifier.js') }}"></script>
 </body>
 </html>

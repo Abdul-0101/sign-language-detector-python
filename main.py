@@ -22,11 +22,9 @@ with open('dictionary.txt', 'r') as f:
 mp_hands = mp.solutions.hands.Hands(static_image_mode=False, min_detection_confidence=0.9)
 
 # Variables
-stable_detection_threshold = 3
-stable_count = 0
-last_detected_letter = ""
-current_confirmed_letter = ""
 paragraph = ""
+last_letter = ""
+word_confirmed = False
 
 @app.route('/')
 def index():
@@ -34,7 +32,7 @@ def index():
 
 @app.route('/predict', methods=['POST'])
 def predict():
-    global stable_count, last_detected_letter, current_confirmed_letter, paragraph
+    global paragraph, last_letter, word_confirmed
 
     file = request.files['frame']
     npimg = np.frombuffer(file.read(), np.uint8)
@@ -43,9 +41,13 @@ def predict():
     result = mp_hands.process(img_rgb)
 
     if not result.multi_hand_landmarks:
-        stable_count = 0
-        last_detected_letter = ""
+        # No hand detected: consider word completed
+        if last_letter and not word_confirmed:
+            paragraph += " "
+            word_confirmed = True
         return jsonify(letter="", paragraph=paragraph)
+
+    word_confirmed = False  # Reset flag if hand appears
 
     hand_landmarks = result.multi_hand_landmarks[0]
     xs = [lm.x for lm in hand_landmarks.landmark]
@@ -59,18 +61,11 @@ def predict():
     feature_vector = np.asarray(feature_vector).reshape(1, -1)
     prediction = model.predict(feature_vector)[0]
 
-    if prediction == last_detected_letter:
-        stable_count += 1
-    else:
-        stable_count = 1
-        last_detected_letter = prediction
-
-    if stable_count >= stable_detection_threshold:
-        current_confirmed_letter = prediction
+    if prediction != last_letter:
         paragraph += prediction
-        stable_count = 0
+        last_letter = prediction
 
-    return jsonify(letter=current_confirmed_letter, paragraph=paragraph)
+    return jsonify(letter=prediction, paragraph=paragraph)
 
 @app.route('/predict_word', methods=['GET'])
 def predict_word():
@@ -88,13 +83,13 @@ def backspace():
 def space():
     global paragraph
     paragraph += ' '
-    return speak()
+    return jsonify(paragraph=paragraph)
 
 @app.route('/newline', methods=['POST'])
 def newline():
     global paragraph
     paragraph += '\n'
-    return speak()
+    return jsonify(paragraph=paragraph)
 
 @app.route('/clear', methods=['POST'])
 def clear():

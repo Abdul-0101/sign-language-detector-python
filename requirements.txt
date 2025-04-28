@@ -11,3 +11,4 @@ imgaug>=0.4.0  # For data augmentation
 gunicorn
 flask
 gTTS
+playsound

@@ -10,7 +10,7 @@ import base64
 
 app = Flask(__name__)
 
-# Load the model
+# Load model
 with open('model.p', 'rb') as f:
     model = pickle.load(f)['model']
 
@@ -18,6 +18,7 @@ with open('model.p', 'rb') as f:
 with open('dictionary.txt', 'r') as f:
     DICTIONARY = [line.strip().upper() for line in f]
 
+# MediaPipe Hands
 mp_hands = mp.solutions.hands.Hands(static_image_mode=False, min_detection_confidence=0.9)
 
 # Variables

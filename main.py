@@ -1,82 +1,112 @@
-from flask import Flask, render_template, Response, redirect, url_for
+from flask import Flask, render_template, request, jsonify, send_file
+import pickle
+import os
 import cv2
-
-# import everything your inference module exposes:
-from inference_classifier import (
-    predict,
-    update_current_word,
-    get_current_word,
-    reset_current_word,
-    speak
-)
+import mediapipe as mp
+import numpy as np
+from gtts import gTTS
+import io
 
 app = Flask(__name__)
-camera = cv2.VideoCapture(0)
+
+# Load model
+with open('model.p', 'rb') as f:
+    model = pickle.load(f)['model']
+
+# Load dictionary
+with open('dictionary.txt', 'r') as f:
+    DICTIONARY = set(line.strip().upper() for line in f)
+
+# MediaPipe Hands initialization
+mp_hands = mp.solutions.hands.Hands(static_image_mode=False, min_detection_confidence=0.9)
+
+# Stability Control Variables
+stable_detection_threshold = 3
+stable_count = 0
+last_detected_letter = ""
+current_confirmed_letter = ""
+forming_word = ""
 
 @app.route('/')
 def index():
     return render_template('index.html')
 
-@app.route('/reset')
-def reset():
-    reset_current_word()
-    return redirect(url_for('index'))
+@app.route('/predict', methods=['POST'])
+def predict():
+    global stable_count, last_detected_letter, current_confirmed_letter, forming_word
 
-@app.route('/inference-code')
-def show_inference_code():
-    with open('inference_classifier.py', 'r') as f:
-        code = f.read()
-    return render_template('inference.html', code=code)
+    file = request.files['frame']
+    npimg = np.frombuffer(file.read(), np.uint8)
+    img = cv2.imdecode(npimg, cv2.IMREAD_COLOR)
+    img = cv2.flip(img, 1)  # Correct flip
 
-def generate_frames():
-    while True:
-        success, frame = camera.read()
-        if not success:
-            break
+    img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+    result = mp_hands.process(img_rgb)
 
-        # 1) run your full inference pipeline
-        letter, confidence, frame = predict(frame)
+    if not result.multi_hand_landmarks:
+        stable_count = 0
+        last_detected_letter = ""
+        return jsonify(letter="", word=forming_word)
 
-        # 2) draw ROI
-        cv2.rectangle(frame, (100, 100), (300, 300), (255, 0, 0), 2)
+    hand_landmarks = result.multi_hand_landmarks[0]
+    xs = [lm.x for lm in hand_landmarks.landmark]
+    ys = [lm.y for lm in hand_landmarks.landmark]
+    feature_vector = []
 
-        # 3) only append & speak if confident
-        if confidence > 0.7:
-            update_current_word(letter)
-            speak(get_current_word())   # will regenerate static/tts.mp3
-            cv2.putText(
-                frame,
-                f"{letter} ({confidence*100:.1f}%)",
-                (100, 90),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                1, (0, 255, 0), 2
-            )
+    for lm in hand_landmarks.landmark:
+        feature_vector.append(lm.x - min(xs))
+        feature_vector.append(lm.y - min(ys))
 
-        # 4) overlay the cumulatively formed word
-        word = get_current_word()
-        cv2.putText(
-            frame,
-            f"Word: {word}",
-            (100, 350),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            1, (0, 0, 255), 2
-        )
+    feature_vector = np.asarray(feature_vector).reshape(1, -1)
+    prediction = model.predict(feature_vector)[0]
 
-        # 5) stream it
-        ret, jpeg = cv2.imencode('.jpg', frame)
-        if not ret:
-            continue
-        yield (
-            b'--frame\r\n'
-            b'Content-Type: image/jpeg\r\n\r\n' + jpeg.tobytes() + b'\r\n'
-        )
+    # Stability logic
+    if prediction == last_detected_letter:
+        stable_count += 1
+    else:
+        stable_count = 1
+        last_detected_letter = prediction
 
-@app.route('/video')
-def video():
-    return Response(
-        generate_frames(),
-        mimetype='multipart/x-mixed-replace; boundary=frame'
-    )
+    if stable_count >= stable_detection_threshold:
+        current_confirmed_letter = prediction
+        forming_word += prediction
+        stable_count = 0
 
-if __name__ == "__main__":
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    return jsonify(letter=current_confirmed_letter, word=forming_word)
+
+@app.route('/backspace', methods=['POST'])
+def backspace():
+    global forming_word
+    forming_word = forming_word[:-1]
+    return jsonify(word=forming_word)
+
+@app.route('/space', methods=['POST'])
+def space():
+    global forming_word
+    forming_word += ' '
+    return jsonify(word=forming_word)
+
+@app.route('/newline', methods=['POST'])
+def newline():
+    global forming_word
+    forming_word += '\n'
+    return jsonify(word=forming_word)
+
+@app.route('/correction', methods=['POST'])
+def correction():
+    global forming_word
+    corrected = request.form.get('corrected', '')
+    forming_word = corrected
+    return jsonify(word=forming_word)
+
+@app.route('/speak', methods=['GET'])
+def speak():
+    tts = gTTS(text=forming_word, lang='en')
+    mp3_fp = io.BytesIO()
+    tts.write_to_fp(mp3_fp)
+    mp3_fp.seek(0)
+    return send_file(mp3_fp, mimetype="audio/mpeg")
+
+if __name__ == '__main__':
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port)

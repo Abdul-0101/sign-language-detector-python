@@ -18,7 +18,6 @@ with open('model.p', 'rb') as f:
 with open('dictionary.txt', 'r') as f:
     DICTIONARY = [line.strip().upper() for line in f]
 
-# MediaPipe Hands
 mp_hands = mp.solutions.hands.Hands(static_image_mode=False, min_detection_confidence=0.9)
 
 # Variables
@@ -26,7 +25,7 @@ stable_detection_threshold = 3
 stable_count = 0
 last_detected_letter = ""
 current_confirmed_letter = ""
-forming_word = ""
+paragraph = ""
 
 @app.route('/')
 def index():
@@ -34,19 +33,18 @@ def index():
 
 @app.route('/predict', methods=['POST'])
 def predict():
-    global stable_count, last_detected_letter, current_confirmed_letter, forming_word
+    global stable_count, last_detected_letter, current_confirmed_letter, paragraph
 
     file = request.files['frame']
     npimg = np.frombuffer(file.read(), np.uint8)
     img = cv2.imdecode(npimg, cv2.IMREAD_COLOR)
-    # No flip here for ML, flip only for display in frontend
     img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
     result = mp_hands.process(img_rgb)
 
     if not result.multi_hand_landmarks:
         stable_count = 0
         last_detected_letter = ""
-        return jsonify(letter="", word=forming_word)
+        return jsonify(letter="", paragraph=paragraph)
 
     hand_landmarks = result.multi_hand_landmarks[0]
     xs = [lm.x for lm in hand_landmarks.landmark]
@@ -68,10 +66,10 @@ def predict():
 
     if stable_count >= stable_detection_threshold:
         current_confirmed_letter = prediction
-        forming_word += prediction
+        paragraph += prediction
         stable_count = 0
 
-    return jsonify(letter=current_confirmed_letter, word=forming_word)
+    return jsonify(letter=current_confirmed_letter, paragraph=paragraph)
 
 @app.route('/predict_word', methods=['GET'])
 def predict_word():
@@ -81,43 +79,43 @@ def predict_word():
 
 @app.route('/backspace', methods=['POST'])
 def backspace():
-    global forming_word
-    forming_word = forming_word[:-1]
-    return jsonify(word=forming_word)
+    global paragraph
+    paragraph = paragraph[:-1]
+    return jsonify(paragraph=paragraph)
 
 @app.route('/space', methods=['POST'])
 def space():
-    global forming_word
-    forming_word += ' '
-    return jsonify(word=forming_word)
+    global paragraph
+    paragraph += ' '
+    return speak()
 
 @app.route('/newline', methods=['POST'])
 def newline():
-    global forming_word
-    forming_word += '\n'
-    return jsonify(word=forming_word)
-
-@app.route('/correction', methods=['POST'])
-def correction():
-    global forming_word
-    corrected = request.form.get('corrected', '')
-    forming_word = corrected
-    return jsonify(word=forming_word)
+    global paragraph
+    paragraph += '\n'
+    return speak()
 
 @app.route('/clear', methods=['POST'])
 def clear():
-    global forming_word
-    forming_word = ""
-    return jsonify(word=forming_word)
+    global paragraph
+    paragraph = ""
+    return jsonify(paragraph=paragraph)
+
+@app.route('/correction', methods=['POST'])
+def correction():
+    global paragraph
+    corrected = request.form.get('corrected', '')
+    paragraph = corrected
+    return jsonify(paragraph=paragraph)
 
 @app.route('/speak', methods=['GET'])
 def speak():
-    tts = gTTS(text=forming_word, lang='en')
+    tts = gTTS(text=paragraph, lang='en')
     mp3_fp = io.BytesIO()
     tts.write_to_fp(mp3_fp)
     mp3_fp.seek(0)
     audio_base64 = base64.b64encode(mp3_fp.read()).decode('utf-8')
-    return jsonify(audio=audio_base64)
+    return jsonify(audio=audio_base64, paragraph=paragraph)
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))

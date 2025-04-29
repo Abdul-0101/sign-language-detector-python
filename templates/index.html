@@ -6,7 +6,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;700&display=swap" rel="stylesheet">
   <style>
     body { font-family: 'Poppins', sans-serif; text-align: center; background: #f0f2f5; margin-top: 20px; }
-    video { border: 3px solid #007bff; border-radius: 8px; transform: scaleX(-1); } /* Flip video display only */
+    video { border: 3px solid #007bff; border-radius: 8px; transform: scaleX(-1); } /* Flip video for viewing only */
     button { margin: 5px; padding: 10px 20px; font-size: 18px; background: #007bff; border: none; color: white; border-radius: 8px; cursor: pointer; }
     button:hover { background: #0056b3; }
     input { margin: 10px; padding: 10px; width: 300px; font-size: 16px; border-radius: 8px; border: 1px solid #ccc; }
@@ -20,8 +20,8 @@
 
 <h1>🤟 Sign Language Live Translator</h1>
 
-<video id="video" width="640" height="480" autoplay playsinline></video>
-<canvas id="canvas" width="640" height="480" style="display:none;"></canvas>
+<video id="video" width="320" height="240" autoplay playsinline></video> <!-- ✅ Smaller video resolution -->
+<canvas id="canvas" width="320" height="240" style="display:none;"></canvas>
 
 <h2>Detected Letter: <span id="letter">-</span></h2>
 <h2>Full Paragraph:</h2>
@@ -43,6 +43,7 @@
   <button onclick="correction()">✏ Correct</button>
 </div>
 
+<!-- Popup for Signs -->
 <div id="signPopup">
   <button onclick="hideSigns()">❌ Close</button><br><br>
   <img src="https://www.researchgate.net/publication/305110120/figure/fig1/AS:406942804660224@1474034133389/ndian-sign-language-dataset.png" alt="All Signs">
@@ -56,7 +57,9 @@ const letterSpan = document.getElementById('letter');
 const paragraphDiv = document.getElementById('paragraph');
 const predictionsDiv = document.getElementById('predictions');
 
-navigator.mediaDevices.getUserMedia({ video: true })
+navigator.mediaDevices.getUserMedia({ 
+  video: { width: { ideal: 320 }, height: { ideal: 240 } } 
+})
 .then(stream => { video.srcObject = stream; });
 
 video.addEventListener('play', () => {
@@ -70,8 +73,8 @@ video.addEventListener('play', () => {
       letterSpan.textContent = data.letter || '-';
       paragraphDiv.textContent = data.paragraph || '-';
       suggestWord(data.paragraph.split(' ').pop());
-    }, 'image/jpeg');
-  }, 300);
+    }, 'image/jpeg', 0.7);  // ✅ Compression set to 70% quality
+  }, 500); // ✅ Slower sending rate (500ms)
 });
 
 async function suggestWord(partial) {

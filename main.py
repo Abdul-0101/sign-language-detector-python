@@ -1,7 +1,3 @@
-# ✅ Final Plan: Merge Local `inference_classifier.py` Logic into Flask App
-
-# main.py (Updated with all local logic and features, gTTS only, no voice input)
-
 from flask import Flask, request, jsonify, render_template
 import pickle
 import numpy as np
@@ -12,29 +8,28 @@ import os
 
 app = Flask(__name__)
 
+# Load model
 with open("model.p", "rb") as f:
     model = pickle.load(f)["model"]
 
+# Load dictionary
 with open("dictionary.txt", "r") as f:
     dictionary = set(word.strip().upper() for word in f)
 
 def predict_word(prefix):
-    if not prefix:
-        return ""
     prefix = prefix.upper()
     matches = [word for word in dictionary if word.startswith(prefix)]
-    if matches:
-        return max(matches, key=len)
-    return ""
+    return max(matches, key=len) if matches else ""
 
+# Text state
 paragraph = ""
 current_text = ""
-waiting_for_hand_removal = False
-hand_absent_count = 0
-hand_absent_threshold = 2
 last_detected_letter = ""
 stable_count = 0
 stable_threshold = 3
+waiting_for_hand_removal = False
+hand_absent_count = 0
+hand_absent_threshold = 2
 
 @app.route("/")
 def index():
@@ -42,7 +37,8 @@ def index():
 
 @app.route("/predict", methods=["POST"])
 def predict():
-    global paragraph, current_text, last_detected_letter, stable_count, waiting_for_hand_removal, hand_absent_count
+    global paragraph, current_text, last_detected_letter
+    global stable_count, waiting_for_hand_removal, hand_absent_count
 
     data = request.get_json()
     features = data.get("features", [])
@@ -61,15 +57,18 @@ def predict():
 
     if hand_present and len(features) == 42:
         detected_letter = model.predict([features])[0]
+
         if detected_letter == last_detected_letter:
             stable_count += 1
         else:
             last_detected_letter = detected_letter
             stable_count = 1
+
         if stable_count >= stable_threshold:
             current_text += detected_letter
             stable_count = 0
             waiting_for_hand_removal = True
+
         predicted = predict_word(current_text)
         return jsonify(letter=detected_letter, current=current_text, predicted=predicted, paragraph=paragraph)
 
@@ -113,7 +112,7 @@ def clear():
 
 @app.route("/correction", methods=["POST"])
 def correction():
-    global paragraph, current_text
+    global current_text
     correction = request.form.get("corrected", "")
     if correction:
         dictionary.add(correction.upper())
@@ -132,5 +131,7 @@ def speak():
     encoded = base64.b64encode(buf.read()).decode()
     return jsonify(audio=encoded)
 
+# ✅ Use dynamic port and bind to 0.0.0.0 for deployment
 if __name__ == "__main__":
-    app.run(debug=True)
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port)

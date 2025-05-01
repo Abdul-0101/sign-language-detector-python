@@ -2,16 +2,18 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Live Sign Language Translator</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Sign Language Translator</title>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
   <style>
-    body { font-family: sans-serif; text-align: center; background: #f7f7f7; padding: 1em; }
+    * { box-sizing: border-box; }
+    body { font-family: Arial, sans-serif; background: #f7f9fc; margin: 0; padding: 20px; text-align: center; }
     video { width: 100%; max-width: 480px; border: 3px solid #007bff; border-radius: 8px; transform: scaleX(-1); }
-    #letter, #paragraph { margin-top: 1em; font-size: 1.2em; }
-    .btn { margin: .5em; padding: .5em 1em; font-size: 1em; border: none; border-radius: 5px; background: #007bff; color: #fff; }
-    input { font-size: 1em; padding: .5em; width: 80%; max-width: 300px; margin-top: .5em; }
+    #letter, #paragraph { margin-top: 10px; font-size: 1.2em; }
+    .btn { margin: 8px; padding: 10px 20px; font-size: 1em; border: none; border-radius: 6px; background: #007bff; color: white; cursor: pointer; }
+    .btn:hover { background: #0056b3; }
+    input { margin-top: 10px; padding: 8px; font-size: 1em; width: 80%; max-width: 300px; border: 1px solid #ccc; border-radius: 6px; }
   </style>
 </head>
 <body>
@@ -30,7 +32,7 @@
 
   <input id="corrected" placeholder="Correct word…" />
   <button class="btn" onclick="correction()">✏️ Correct</button>
-  
+
   <script>
     const video = document.getElementById('video');
     const letterDiv = document.getElementById('letter');
@@ -39,11 +41,11 @@
     let lastFeatures = [];
 
     const hands = new Hands({ locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}` });
-    hands.setOptions({ maxNumHands: 1, modelComplexity: 1, minDetectionConfidence: 0.8, minTrackingConfidence: 0.8 });
+    hands.setOptions({ maxNumHands: 1, modelComplexity: 1, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5 });
     hands.onResults(onResults);
 
-    const cam = new Camera(video, { onFrame: async () => await hands.send({ image: video }), width: 480, height: 360 });
-    cam.start();
+    const camera = new Camera(video, { onFrame: async () => await hands.send({ image: video }), width: 480, height: 360 });
+    camera.start();
 
     async function onResults(results) {
       let features = [], present = false;
@@ -57,35 +59,52 @@
         }
         lastFeatures = features;
       }
+
       const res = await fetch('/predict', {
-        method: 'POST', headers: {'Content-Type':'application/json'},
-        body: JSON.stringify({ features, hand_present: present })
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ features: features, hand_present: present })
       });
-      const d = await res.json();
-      letterDiv.innerText = 'Letter: ' + (d.letter||'–');
-      paraDiv.innerText   = 'Paragraph: ' + (d.paragraph||'');
+      const data = await res.json();
+      letterDiv.innerText = 'Letter: ' + (data.letter || '–');
+      paraDiv.innerText = 'Paragraph: ' + (data.paragraph || '');
     }
 
-    function backspace() { fetch('/backspace',{method:'POST'}).then(r=>r.json()).then(u=>{ letterDiv.innerText='Letter: –'; paraDiv.innerText='Paragraph: '+u.paragraph; }); }
+    function backspace() {
+      fetch('/clear', { method: 'POST' });
+      fetch('/backspace', { method: 'POST' }).then(r => r.json()).then(u => { letterDiv.innerText = 'Letter: –'; paraDiv.innerText = 'Paragraph: ' + u.paragraph; });
+    }
     function space() {
-      fetch('/space',{method:'POST'}).then(r=>r.json()).then(async u=>{
-        paraDiv.innerText='Paragraph: '+u.paragraph;
-        const last=W=>W.trim().split(' ').slice(-1)[0];
-        const w=last(u.paragraph);
-        const corr=prompt(`You typed "${w}". Correct? If not, enter fix:`);
-        if(corr) await fetch('/feedback',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({features:lastFeatures,correct:corr})});
+      fetch('/space', { method: 'POST' }).then(r => r.json()).then(u => {
+        paraDiv.innerText = 'Paragraph: ' + u.paragraph;
       });
     }
     function newline() {
-      fetch('/newline',{method:'POST'}).then(r=>r.json()).then(async u=>{
-        paraDiv.innerText='Paragraph: '+u.paragraph;
-        const w=u.paragraph.trim().split(/[ \n]/).slice(-1)[0];
-        const corr=prompt(`You typed "${w}". Correct? If not, enter fix:`);
-        if(corr) await fetch('/feedback',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({features:lastFeatures,correct:corr})});
+      fetch('/newline', { method: 'POST' }).then(r => r.json()).then(u => {
+        paraDiv.innerText = 'Paragraph: ' + u.paragraph;
       });
     }
-    function clearAll() { fetch('/clear',{method:'POST'}).then(r=>r.json()).then(_=>{ letterDiv.innerText='Letter: –'; paraDiv.innerText='Paragraph:'; }); }
-    function speak() { fetch('/speak').then(r=>r.json()).then(d=>{ if(d.audio){ new Audio('data:audio/mp3;base64,'+d.audio).play(); }}); }
-    function correction() { const c=corrInput.value; fetch('/correction',{method:'POST',body:new URLSearchParams({corrected:c})}).then(r=>r.json()).then(u=>{ paraDiv.innerText='Paragraph: '+u.paragraph; }); }
-    document.addEventListener('keydown',e=>{ if(e.key==='Backspace')backspace(); if(e.key===' ') {e.preventDefault();space();} if(e.key==='Enter'){e.preventDefault();newline();} });
+    function clearAll() {
+      fetch('/clear', { method: 'POST' }).then(r => r.json()).then(u => {
+        letterDiv.innerText = 'Letter: –';
+        paraDiv.innerText = 'Paragraph:';
+      });
+    }
+    function speak() {
+      fetch('/speak').then(r => r.json()).then(d => {
+        if (d.audio) new Audio('data:audio/mp3;base64,' + d.audio).play();
+      });
+    }
+    function correction() {
+      const corr = corrInput.value;
+      fetch('/correction', { method: 'POST', body: new URLSearchParams({ corrected: corr }) })
+        .then(r => r.json()).then(u => {
+          paraDiv.innerText = 'Paragraph: ' + u.paragraph;
+        });
+    }
+
+    document.addEventListener('keydown', e => {
+      if (e.key === 'Backspace') backspace();
+      if (e.key === ' ') { e.preventDefault(); space(); }
+      if (e.key === 'Enter') { e.preventDefault(); newline(); }
+    });
   </script>

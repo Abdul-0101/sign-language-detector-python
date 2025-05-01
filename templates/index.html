@@ -1,81 +1,202 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <meta charset="utf-8">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Sign Language Translator</title>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
   <style>
-    body { font-family: sans-serif; text-align: center; background: #f0f0f0; }
-    video { border: 2px solid #007bff; transform: scaleX(-1); }
-    canvas { display: none; }
-    button, input { margin: 8px; padding: 10px; font-size: 16px; }
-    #signPopup img { width: 80%; max-width: 800px; margin: 10px auto; }
+    * { box-sizing: border-box; }
+    body {
+      font-family: 'Segoe UI', sans-serif;
+      background: #f7f9fc;
+      margin: 0;
+      padding: 20px;
+      text-align: center;
+      color: #222;
+    }
+    h1 { margin-bottom: 10px; }
+    video {
+      border: 4px solid #007bff;
+      border-radius: 12px;
+      width: 100%;
+      max-width: 640px;
+      height: auto;
+      transform: scaleX(-1);
+    }
+    #letter, #paragraph {
+      font-size: 20px;
+      margin-top: 15px;
+      font-weight: bold;
+    }
+    .btn-group {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      margin-top: 20px;
+      gap: 10px;
+    }
+    button {
+      font-size: 16px;
+      padding: 12px 20px;
+      border: none;
+      border-radius: 8px;
+      background: #007bff;
+      color: white;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    button:hover {
+      background: #0056b3;
+    }
+    input {
+      font-size: 16px;
+      padding: 10px;
+      border: 1px solid #ccc;
+      border-radius: 8px;
+      width: 80%;
+      max-width: 300px;
+      margin-top: 15px;
+    }
   </style>
 </head>
 <body>
 
-<h1>Sign Language Translator</h1>
+  <h1>Sign Language Translator</h1>
 
-<video id="video" width="320" height="240" autoplay></video>
-<canvas id="canvas" width="320" height="240"></canvas>
+  <video id="video" autoplay playsinline muted></video>
 
-<h2>Letter: <span id="letter">-</span></h2>
-<h3>Paragraph:</h3>
-<div id="paragraph" style="white-space:pre-wrap; font-size: 18px;"></div>
+  <div id="letter">Letter: -</div>
+  <div id="paragraph">Paragraph:</div>
 
-<div id="predictions"></div>
+  <div class="btn-group">
+    <button onclick="backspace()">⌫</button>
+    <button onclick="space()">Space</button>
+    <button onclick="newline()">↵</button>
+    <button onclick="clearAll()">🧹</button>
+    <button onclick="speak()">🔈 Speak</button>
+  </div>
 
-<div>
-  <button onclick="backspace()">⌫</button>
-  <button onclick="space()">Space</button>
-  <button onclick="newline()">↵</button>
-  <button onclick="speak()">🔈</button>
-  <button onclick="clearAll()">🧹</button>
-</div>
+  <input id="corrected" placeholder="Correct manually..." />
+  <button onclick="correction()">✏ Correct</button>
 
-<input id="corrected" placeholder="Correct manually...">
-<button onclick="correction()">✏</button>
+  <script>
+    const videoElement = document.getElementById("video");
+    const letterDiv = document.getElementById("letter");
+    const paragraphDiv = document.getElementById("paragraph");
 
-<script>
-const video = document.getElementById("video");
-const canvas = document.getElementById("canvas");
-const ctx = canvas.getContext("2d");
-const letterSpan = document.getElementById("letter");
-const paragraphDiv = document.getElementById("paragraph");
+    const hands = new Hands({
+      locateFile: (file) =>
+        `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`,
+    });
 
-navigator.mediaDevices.getUserMedia({ video: true })
-.then(stream => { video.srcObject = stream; });
+    hands.setOptions({
+      maxNumHands: 1,
+      modelComplexity: 1,
+      minDetectionConfidence: 0.8,
+      minTrackingConfidence: 0.8,
+    });
 
-video.addEventListener("play", () => {
-  setInterval(() => {
-    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-    canvas.toBlob(async blob => {
+    hands.onResults(onResults);
+
+    const camera = new Camera(videoElement, {
+      onFrame: async () => {
+        await hands.send({ image: videoElement });
+      },
+      width: 640,
+      height: 480,
+    });
+    camera.start();
+
+    async function onResults(results) {
+      if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+        const lm = results.multiHandLandmarks[0];
+        const xs = lm.map(p => p.x);
+        const ys = lm.map(p => p.y);
+        const features = [];
+        for (let i = 0; i < 21; i++) {
+          features.push(lm[i].x - Math.min(...xs));
+          features.push(lm[i].y - Math.min(...ys));
+        }
+
+        fetch("/predict", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ features: features, hand_present: true })
+        })
+        .then(res => res.json())
+        .then(data => {
+          letterDiv.innerText = "Letter: " + (data.letter || "-");
+          paragraphDiv.innerText = "Paragraph: " + (data.paragraph || "");
+        });
+      } else {
+        fetch("/predict", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ features: [], hand_present: false })
+        })
+        .then(res => res.json())
+        .then(data => {
+          letterDiv.innerText = "Letter: -";
+          paragraphDiv.innerText = "Paragraph: " + (data.paragraph || "");
+        });
+      }
+    }
+
+    function backspace() {
+      fetch("/backspace", { method: "POST" })
+        .then(res => res.json())
+        .then(data => updateUI(data));
+    }
+
+    function space() {
+      fetch("/space", { method: "POST" })
+        .then(res => res.json())
+        .then(data => updateUI(data));
+    }
+
+    function newline() {
+      fetch("/newline", { method: "POST" })
+        .then(res => res.json())
+        .then(data => updateUI(data));
+    }
+
+    function clearAll() {
+      fetch("/clear", { method: "POST" })
+        .then(res => res.json())
+        .then(data => updateUI(data));
+    }
+
+    function speak() {
+      fetch("/speak")
+        .then(res => res.json())
+        .then(data => {
+          const audio = new Audio("data:audio/mp3;base64," + data.audio);
+          audio.play();
+        });
+    }
+
+    function correction() {
+      const corrected = document.getElementById("corrected").value;
       const form = new FormData();
-      form.append("frame", blob);
-      const res = await fetch("/predict", { method: "POST", body: form });
-      const data = await res.json();
-      letterSpan.textContent = data.letter || "-";
-      paragraphDiv.textContent = data.paragraph || "";
-    }, "image/jpeg", 0.8);
-  }, 500);
-});
+      form.append("corrected", corrected);
+      fetch("/correction", { method: "POST", body: form })
+        .then(res => res.json())
+        .then(data => updateUI(data));
+    }
 
-function backspace() { fetch("/backspace", { method: "POST" }).then(r => r.json()).then(d => paragraphDiv.textContent = d.paragraph); }
-function space() { fetch("/space", { method: "POST" }).then(r => r.json()).then(d => paragraphDiv.textContent = d.paragraph); }
-function newline() { fetch("/newline", { method: "POST" }).then(r => r.json()).then(d => paragraphDiv.textContent = d.paragraph); }
-function clearAll() { fetch("/clear", { method: "POST" }).then(r => r.json()).then(d => paragraphDiv.textContent = d.paragraph); }
-function correction() {
-  const corrected = document.getElementById("corrected").value;
-  const form = new FormData();
-  form.append("corrected", corrected);
-  fetch("/correction", { method: "POST", body: form }).then(r => r.json()).then(d => paragraphDiv.textContent = d.paragraph);
-}
-function speak() {
-  fetch("/speak").then(r => r.json()).then(d => {
-    const audio = new Audio("data:audio/mpeg;base64," + d.audio);
-    audio.play();
-  });
-}
-</script>
+    function updateUI(data) {
+      paragraphDiv.innerText = "Paragraph: " + (data.paragraph || "");
+    }
+
+    // Keyboard Support
+    document.addEventListener("keydown", function (e) {
+      if (e.key === "Backspace") backspace();
+      if (e.key === " ") space();
+      if (e.key === "Enter") newline();
+    });
+  </script>
 
 </body>
 </html>

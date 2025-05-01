@@ -8,20 +8,15 @@ import os
 
 app = Flask(__name__)
 
-# Load pre-trained model (unchanged)
+# Load Random Forest model
 with open('model.p', 'rb') as f:
     model = pickle.load(f)['model']
 
-# Load dictionary for suggestions
+# Load dictionary
 with open('dictionary.txt', 'r') as f:
     dictionary = set(w.strip().upper() for w in f)
 
-def predict_word(prefix):
-    prefix = prefix.upper()
-    matches = [w for w in dictionary if w.startswith(prefix)]
-    return max(matches, key=len) if matches else ''
-
-# Application state
+# Global state
 paragraph = ''
 current_text = ''
 last_letter = None
@@ -30,6 +25,7 @@ STABLE_THRESHOLD = 5
 waiting_removal = False
 absent_count = 0
 ABSENT_THRESHOLD = 2
+CONFIDENCE_THRESHOLD = 0.85
 
 @app.route('/')
 def index():
@@ -43,7 +39,6 @@ def predict():
     features = data.get('features', [])
     hand_present = data.get('hand_present', False)
 
-    # Wait for hand removal to start next letter
     if waiting_removal:
         if not hand_present:
             absent_count += 1
@@ -55,9 +50,14 @@ def predict():
             absent_count = 0
         return jsonify(letter='', current=current_text, paragraph=paragraph)
 
-    # Detect letter when hand is present
     if hand_present and len(features) == 42:
-        idx = model.predict([features])[0]
+        proba = model.predict_proba([features])[0]
+        idx = int(np.argmax(proba))
+        confidence = proba[idx]
+
+        if confidence < CONFIDENCE_THRESHOLD:
+            return jsonify(letter='', current=current_text, paragraph=paragraph)
+
         if idx == last_letter:
             stable_count += 1
         else:
@@ -65,7 +65,7 @@ def predict():
             stable_count = 1
 
         if stable_count >= STABLE_THRESHOLD:
-            letter = chr(65 + int(idx))
+            letter = chr(65 + idx)
             current_text += letter
             stable_count = 0
             waiting_removal = True

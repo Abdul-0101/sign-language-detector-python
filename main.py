@@ -1,3 +1,5 @@
+## 1. main.py
+```python
 from flask import Flask, request, jsonify, render_template
 import pickle
 import numpy as np
@@ -5,15 +7,24 @@ from gtts import gTTS
 import base64
 import io
 import os
-import threading
+from sklearn.linear_model import SGDClassifier
 
 app = Flask(__name__)
 
-# Load model
-with open("model.p", "rb") as f:
-    model = pickle.load(f)["model"]
+# Load or initialize an incremental model
+MODEL_PATH = "model.p"
+if os.path.exists(MODEL_PATH):
+    with open(MODEL_PATH, "rb") as f:
+        model = pickle.load(f)["model"]
+else:
+    # Create initial SGD classifier for 26 letters (0=A,...)
+    model = SGDClassifier(loss="log", max_iter=1000, tol=1e-3)
+    # Dummy partial_fit with all classes to initialize
+    model.partial_fit(np.zeros((26, 42)), list(range(26)), classes=list(range(26)))
+    with open(MODEL_PATH, "wb") as f:
+        pickle.dump({"model": model}, f)
 
-# Load dictionary
+# Load dictionary for word prediction
 with open("dictionary.txt", "r") as f:
     dictionary = set(w.strip().upper() for w in f)
 
@@ -22,72 +33,55 @@ def predict_word(prefix):
     matches = [w for w in dictionary if w.startswith(prefix)]
     return max(matches, key=len) if matches else ""
 
-# State
+# App state
 paragraph = ""
 current_text = ""
-last_detected_letter = ""
+last_letter = ""
 stable_count = 0
-stable_threshold = 3
-waiting_for_hand_removal = False
-hand_absent_count = 0
-hand_absent_threshold = 2
+STABLE_THRESHOLD = 3
+waiting_removal = False
+absent_count = 0
+ABSENT_THRESHOLD = 2
 
-# Online learning buffers
-feedback_X = []
-feedback_y = []
-model_lock = threading.Lock()
-
-def retrain_model():
-    """Re-fit RandomForest on augmented data (original + feedback)."""
-    global model
-    with model_lock:
-        if not feedback_X:
-            return
-        # Original training data not stored here; this is just illustrative.
-        # In practice you’d reload original X,y or use partial_fit classifier.
-        X = np.array(feedback_X)
-        y = np.array(feedback_y)
-        model.fit(X, y)
-        with open("model.p", "wb") as f:
-            pickle.dump({"model": model}, f)
-
+# Routes
 @app.route("/")
 def index():
     return render_template("index.html")
 
-@app.route("/predict", methods=["POST"])
+@app.route("/predict", methods=["POST"] )
 def predict():
-    global paragraph, current_text, last_detected_letter
-    global stable_count, waiting_for_hand_removal, hand_absent_count
-
+    global paragraph, current_text, last_letter, stable_count, waiting_removal, absent_count
     data = request.get_json()
     features = data.get("features", [])
     hand_present = data.get("hand_present", False)
-
-    # waiting for removal
-    if waiting_for_hand_removal:
+    
+    # If waiting for user to remove hand
+    if waiting_removal:
         if not hand_present:
-            hand_absent_count += 1
-            if hand_absent_count >= hand_absent_threshold:
-                waiting_for_hand_removal = False
-                hand_absent_count = 0
-                last_detected_letter = ""
+            absent_count += 1
+            if absent_count >= ABSENT_THRESHOLD:
+                waiting_removal = False
+                absent_count = 0
+                last_letter = ""
         else:
-            hand_absent_count = 0
+            absent_count = 0
         return jsonify(letter="", current=current_text, predicted=predict_word(current_text), paragraph=paragraph)
-
-    # detect letter
+    
+    # If hand present and valid features
     if hand_present and len(features) == 42:
-        letter = model.predict([features])[0]
-        if letter == last_detected_letter:
+        letter_idx = model.predict([features])[0]
+        # Map idx to letter
+        letter = chr(ord('A') + int(letter_idx))
+        # stability
+        if letter == last_letter:
             stable_count += 1
         else:
-            last_detected_letter = letter
+            last_letter = letter
             stable_count = 1
-        if stable_count >= stable_threshold:
+        if stable_count >= STABLE_THRESHOLD:
             current_text += letter
             stable_count = 0
-            waiting_for_hand_removal = True
+            waiting_removal = True
         return jsonify(letter=letter, current=current_text, predicted=predict_word(current_text), paragraph=paragraph)
 
     return jsonify(letter="", current=current_text, predicted=predict_word(current_text), paragraph=paragraph)
@@ -106,30 +100,31 @@ def space():
     global current_text, paragraph
     if current_text:
         paragraph += current_text + " "
+        # live feedback prompt via front-end
+        current_text = ""
     elif paragraph and not paragraph.endswith(" "):
         paragraph += " "
-    return jsonify(current="", paragraph=paragraph)
+    return jsonify(current=current_text, paragraph=paragraph)
 
 @app.route("/newline", methods=["POST"])
 def newline():
     global current_text, paragraph
     if current_text:
         paragraph += current_text + "\n"
+        current_text = ""
     else:
         paragraph += "\n"
-    return jsonify(current="", paragraph=paragraph)
+    return jsonify(current=current_text, paragraph=paragraph)
 
 @app.route("/clear", methods=["POST"])
 def clear():
-    global current_text, paragraph
-    current_text = ""
-    paragraph = ""
-    return jsonify(current="", paragraph=paragraph)
+    global paragraph, current_text
+    paragraph, current_text = "", ""
+    return jsonify(current="", paragraph="")
 
 @app.route("/correction", methods=["POST"])
 def correction():
-    """Receive manual correction of current_text"""
-    global current_text
+    global current_text, dictionary
     corr = request.form.get("corrected", "").upper()
     if corr:
         current_text = corr
@@ -138,20 +133,22 @@ def correction():
 
 @app.route("/feedback", methods=["POST"])
 def feedback():
-    """After a word completes, collect features+correct word, retrain in background."""
+    global model
     data = request.get_json()
     features = data.get("features", [])
     correct = data.get("correct", "").upper()
-    if features and correct:
-        feedback_X.append(features)
-        feedback_y.append(correct)
-        # retrain in background
-        threading.Thread(target=retrain_model, daemon=True).start()
+    if len(features) == 42 and correct:
+        y = ord(correct[0]) - 65
+        # online update
+        model.partial_fit([features], [y])
+        # save model
+        with open(MODEL_PATH, "wb") as f:
+            pickle.dump({"model": model}, f)
     return jsonify(status="ok")
 
 @app.route("/speak", methods=["GET"])
 def speak():
-    text = paragraph if paragraph else current_text
+    text = paragraph or current_text
     if not text:
         return jsonify(audio="")
     tts = gTTS(text=text, lang="en")

@@ -1,5 +1,3 @@
-## 1. main.py
-```python
 from flask import Flask, request, jsonify, render_template
 import pickle
 import numpy as np

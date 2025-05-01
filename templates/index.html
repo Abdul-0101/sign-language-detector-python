@@ -1,202 +1,129 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Sign Language Translator</title>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Live Sign Language w/ Feedback</title>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
   <style>
-    * { box-sizing: border-box; }
-    body {
-      font-family: 'Segoe UI', sans-serif;
-      background: #f7f9fc;
-      margin: 0;
-      padding: 20px;
-      text-align: center;
-      color: #222;
-    }
-    h1 { margin-bottom: 10px; }
-    video {
-      border: 4px solid #007bff;
-      border-radius: 12px;
-      width: 100%;
-      max-width: 640px;
-      height: auto;
-      transform: scaleX(-1);
-    }
-    #letter, #paragraph {
-      font-size: 20px;
-      margin-top: 15px;
-      font-weight: bold;
-    }
-    .btn-group {
-      display: flex;
-      flex-wrap: wrap;
-      justify-content: center;
-      margin-top: 20px;
-      gap: 10px;
-    }
-    button {
-      font-size: 16px;
-      padding: 12px 20px;
-      border: none;
-      border-radius: 8px;
-      background: #007bff;
-      color: white;
-      cursor: pointer;
-      transition: background 0.2s;
-    }
-    button:hover {
-      background: #0056b3;
-    }
-    input {
-      font-size: 16px;
-      padding: 10px;
-      border: 1px solid #ccc;
-      border-radius: 8px;
-      width: 80%;
-      max-width: 300px;
-      margin-top: 15px;
-    }
+    body { font-family: sans-serif; background:#f7f7f7; text-align:center; padding:1em; }
+    video { width:100%; max-width:480px; border:3px solid #007bff; border-radius:8px; transform:scaleX(-1); }
+    #letter, #paragraph { margin-top:0.5em; font-size:1.2em; }
+    .btn { margin:0.5em; padding:0.5em 1em; font-size:1em; border:none; border-radius:5px; background:#007bff; color:white; }
   </style>
 </head>
 <body>
-
   <h1>Sign Language Translator</h1>
-
   <video id="video" autoplay playsinline muted></video>
-
-  <div id="letter">Letter: -</div>
+  <div id="letter">Letter: –</div>
   <div id="paragraph">Paragraph:</div>
 
-  <div class="btn-group">
-    <button onclick="backspace()">⌫</button>
-    <button onclick="space()">Space</button>
-    <button onclick="newline()">↵</button>
-    <button onclick="clearAll()">🧹</button>
-    <button onclick="speak()">🔈 Speak</button>
+  <div>
+    <button class="btn" onclick="backspace()">⌫ Backspace</button>
+    <button class="btn" onclick="space()">Space ➡</button>
+    <button class="btn" onclick="newline()">New Line ↵</button>
+    <button class="btn" onclick="clearAll()">🧹 Clear All</button>
+    <button class="btn" onclick="speak()">🔈 Speak</button>
   </div>
 
-  <input id="corrected" placeholder="Correct manually..." />
-  <button onclick="correction()">✏ Correct</button>
+  <input id="corrected" placeholder="Correct word…" />
+  <button class="btn" onclick="correction()">✏️ Correct</button>
 
   <script>
-    const videoElement = document.getElementById("video");
-    const letterDiv = document.getElementById("letter");
-    const paragraphDiv = document.getElementById("paragraph");
+    const video = document.getElementById("video"),
+          letterDiv = document.getElementById("letter"),
+          paraDiv   = document.getElementById("paragraph"),
+          corrInput = document.getElementById("corrected");
+    let lastFeatures = [];
 
-    const hands = new Hands({
-      locateFile: (file) =>
-        `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`,
-    });
-
-    hands.setOptions({
-      maxNumHands: 1,
-      modelComplexity: 1,
-      minDetectionConfidence: 0.8,
-      minTrackingConfidence: 0.8,
-    });
-
+    const hands = new Hands({locateFile: f=>`https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`});
+    hands.setOptions({maxNumHands:1, modelComplexity:1, minDetectionConfidence:0.8, minTrackingConfidence:0.8});
     hands.onResults(onResults);
 
-    const camera = new Camera(videoElement, {
-      onFrame: async () => {
-        await hands.send({ image: videoElement });
-      },
-      width: 640,
-      height: 480,
-    });
-    camera.start();
+    const cam = new Camera(video, {onFrame:async()=>{await hands.send({image:video});}, width:480, height:360});
+    cam.start();
 
     async function onResults(results) {
-      if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+      let features=[], hand_present=false;
+      if(results.multiHandLandmarks?.length) {
+        hand_present = true;
         const lm = results.multiHandLandmarks[0];
-        const xs = lm.map(p => p.x);
-        const ys = lm.map(p => p.y);
-        const features = [];
-        for (let i = 0; i < 21; i++) {
+        const xs = lm.map(p=>p.x), ys = lm.map(p=>p.y);
+        for(let i=0;i<21;i++){
           features.push(lm[i].x - Math.min(...xs));
           features.push(lm[i].y - Math.min(...ys));
         }
-
-        fetch("/predict", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ features: features, hand_present: true })
-        })
-        .then(res => res.json())
-        .then(data => {
-          letterDiv.innerText = "Letter: " + (data.letter || "-");
-          paragraphDiv.innerText = "Paragraph: " + (data.paragraph || "");
-        });
-      } else {
-        fetch("/predict", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ features: [], hand_present: false })
-        })
-        .then(res => res.json())
-        .then(data => {
-          letterDiv.innerText = "Letter: -";
-          paragraphDiv.innerText = "Paragraph: " + (data.paragraph || "");
-        });
+        lastFeatures = features;
       }
+      // send to backend
+      const res = await fetch("/predict", {
+        method:"POST", headers:{"Content-Type":"application/json"},
+        body: JSON.stringify({features, hand_present})
+      });
+      const data = await res.json();
+      letterDiv.innerText = "Letter: " + (data.letter || "–");
+      paraDiv.innerText   = "Paragraph: " + (data.paragraph || "");
     }
 
-    function backspace() {
-      fetch("/backspace", { method: "POST" })
-        .then(res => res.json())
-        .then(data => updateUI(data));
+    function backspace(){
+      fetch("/backspace",{method:"POST"}).then(r=>r.json()).then(u=>{
+        paraDiv.innerText="Paragraph: "+u.paragraph;
+      });
+    }
+    function space(){
+      fetch("/space",{method:"POST"}).then(r=>r.json()).then(async u=>{
+        paraDiv.innerText="Paragraph: "+u.paragraph;
+        // ask for feedback on last word
+        const lastWord = u.paragraph.trim().split(" ").slice(-1)[0];
+        const correct = prompt(`You typed "${lastWord}". Was it correct? If not, enter fix:`);
+        if(correct){
+          await fetch("/feedback",{
+            method:"POST", headers:{"Content-Type":"application/json"},
+            body: JSON.stringify({features:lastFeatures, correct})
+          });
+        }
+      });
+    }
+    function newline(){
+      fetch("/newline",{method:"POST"}).then(r=>r.json()).then(async u=>{
+        paraDiv.innerText="Paragraph: "+u.paragraph;
+        const lastWord = u.paragraph.trim().split(/[ \\n]/).slice(-1)[0];
+        const correct = prompt(`You typed "${lastWord}". Was it correct? If not, enter fix:`);
+        if(correct){
+          await fetch("/feedback",{
+            method:"POST", headers:{"Content-Type":"application/json"},
+            body: JSON.stringify({features:lastFeatures, correct})
+          });
+        }
+      });
+    }
+    function clearAll(){
+      fetch("/clear",{method:"POST"}).then(r=>r.json()).then(u=>{
+        letterDiv.innerText="Letter: –";
+        paraDiv.innerText="Paragraph:";
+      });
+    }
+    function speak(){
+      fetch("/speak").then(r=>r.json()).then(d=>{
+        if(d.audio){
+          const aud=new Audio("data:audio/mp3;base64,"+d.audio);
+          aud.play();
+        }
+      });
+    }
+    function correction(){
+      const corr=corrInput.value;
+      fetch("/correction",{method:"POST",body: new URLSearchParams({corrected:corr})})
+        .then(r=>r.json()).then(u=>paraDiv.innerText="Paragraph: "+u.paragraph);
     }
 
-    function space() {
-      fetch("/space", { method: "POST" })
-        .then(res => res.json())
-        .then(data => updateUI(data));
-    }
-
-    function newline() {
-      fetch("/newline", { method: "POST" })
-        .then(res => res.json())
-        .then(data => updateUI(data));
-    }
-
-    function clearAll() {
-      fetch("/clear", { method: "POST" })
-        .then(res => res.json())
-        .then(data => updateUI(data));
-    }
-
-    function speak() {
-      fetch("/speak")
-        .then(res => res.json())
-        .then(data => {
-          const audio = new Audio("data:audio/mp3;base64," + data.audio);
-          audio.play();
-        });
-    }
-
-    function correction() {
-      const corrected = document.getElementById("corrected").value;
-      const form = new FormData();
-      form.append("corrected", corrected);
-      fetch("/correction", { method: "POST", body: form })
-        .then(res => res.json())
-        .then(data => updateUI(data));
-    }
-
-    function updateUI(data) {
-      paragraphDiv.innerText = "Paragraph: " + (data.paragraph || "");
-    }
-
-    // Keyboard Support
-    document.addEventListener("keydown", function (e) {
-      if (e.key === "Backspace") backspace();
-      if (e.key === " ") space();
-      if (e.key === "Enter") newline();
+    // keyboard
+    document.addEventListener("keydown",e=>{
+      if(e.key==="Backspace") backspace();
+      if(e.key===" ") { e.preventDefault(); space(); }
+      if(e.key==="Enter") { e.preventDefault(); newline(); }
     });
   </script>
-
 </body>
 </html>

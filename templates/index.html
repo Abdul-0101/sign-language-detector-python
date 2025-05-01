@@ -42,7 +42,11 @@
     hands.setOptions({ maxNumHands: 1, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5 });
     hands.onResults(onResults);
 
-    const camera = new Camera(video, { onFrame: async () => await hands.send({ image: video }), width: 480, height: 360 });
+    const camera = new Camera(video, {
+      onFrame: async () => await hands.send({ image: video }),
+      width: 480,
+      height: 360
+    });
     camera.start();
 
     async function onResults(results) {
@@ -50,16 +54,20 @@
       if (results.multiHandLandmarks?.length) {
         present = true;
         const lm = results.multiHandLandmarks[0];
-        const xs = lm.map(p => p.x), ys = lm.map(p => p.y);
+
+        // Normalize using wrist (landmark 0)
+        const baseX = lm[0].x;
+        const baseY = lm[0].y;
         for (let i = 0; i < 21; i++) {
-          features.push(lm[i].x - Math.min(...xs));
-          features.push(lm[i].y - Math.min(...ys));
+          features.push(lm[i].x - baseX);
+          features.push(lm[i].y - baseY);
         }
         lastFeatures = features;
       }
 
       const res = await fetch('/predict', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ features: features, hand_present: present })
       });
       const data = await res.json();
@@ -68,24 +76,56 @@
     }
 
     function backspace() {
-      fetch('/backspace', { method: 'POST' }).then(r => r.json()).then(u => { letterDiv.innerText = 'Letter: –'; paraDiv.innerText = 'Paragraph: ' + u.paragraph; });
+      fetch('/backspace', { method: 'POST' })
+        .then(r => r.json())
+        .then(u => {
+          letterDiv.innerText = 'Letter: –';
+          paraDiv.innerText = 'Paragraph: ' + u.paragraph;
+        });
     }
+
     function space() {
-      fetch('/space', { method: 'POST' }).then(r => r.json()).then(u => { paraDiv.innerText = 'Paragraph: ' + u.paragraph; });
+      fetch('/space', { method: 'POST' })
+        .then(r => r.json())
+        .then(u => {
+          paraDiv.innerText = 'Paragraph: ' + u.paragraph;
+        });
     }
+
     function newline() {
-      fetch('/newline', { method: 'POST' }).then(r => r.json()).then(u => { paraDiv.innerText = 'Paragraph: ' + u.paragraph; });
+      fetch('/newline', { method: 'POST' })
+        .then(r => r.json())
+        .then(u => {
+          paraDiv.innerText = 'Paragraph: ' + u.paragraph;
+        });
     }
+
     function clearAll() {
-      fetch('/clear', { method: 'POST' }).then(r => r.json()).then(u => { letterDiv.innerText = 'Letter: –'; paraDiv.innerText = 'Paragraph:'; });
+      fetch('/clear', { method: 'POST' })
+        .then(r => r.json())
+        .then(u => {
+          letterDiv.innerText = 'Letter: –';
+          paraDiv.innerText = 'Paragraph:';
+        });
     }
+
     function speak() {
-      fetch('/speak').then(r => r.json()).then(d => { if (d.audio) new Audio('data:audio/mp3;base64,' + d.audio).play(); });
+      fetch('/speak')
+        .then(r => r.json())
+        .then(d => {
+          if (d.audio) new Audio('data:audio/mp3;base64,' + d.audio).play();
+        });
     }
+
     function correction() {
       const corr = corrInput.value;
-      fetch('/correction', { method: 'POST', body: new URLSearchParams({ corrected: corr }) })
-        .then(r => r.json()).then(u => { paraDiv.innerText = 'Paragraph: ' + u.paragraph; });
+      fetch('/correction', {
+        method: 'POST',
+        body: new URLSearchParams({ corrected: corr })
+      }).then(r => r.json())
+        .then(u => {
+          paraDiv.innerText = 'Paragraph: ' + u.paragraph;
+        });
     }
 
     document.addEventListener('keydown', e => {
@@ -94,3 +134,5 @@
       if (e.key === 'Enter') { e.preventDefault(); newline(); }
     });
   </script>
+</body>
+</html>

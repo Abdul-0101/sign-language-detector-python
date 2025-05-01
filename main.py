@@ -1,107 +1,136 @@
-from flask import Flask, render_template, request, jsonify
+# ✅ Final Plan: Merge Local `inference_classifier.py` Logic into Flask App
+
+# main.py (Updated with all local logic and features, gTTS only, no voice input)
+
+from flask import Flask, request, jsonify, render_template
 import pickle
 import numpy as np
-import cv2
-import mediapipe as mp
 from gtts import gTTS
-import io
 import base64
+import io
 import os
 
 app = Flask(__name__)
 
-# Load model
 with open("model.p", "rb") as f:
-    model = pickle.load(f)['model']
+    model = pickle.load(f)["model"]
 
-# Load dictionary
 with open("dictionary.txt", "r") as f:
-    DICTIONARY = [line.strip().upper() for line in f]
+    dictionary = set(word.strip().upper() for word in f)
 
-# MediaPipe hands
-mp_hands = mp.solutions.hands.Hands(static_image_mode=False, min_detection_confidence=0.9)
-mp_draw = mp.solutions.drawing_utils
+def predict_word(prefix):
+    if not prefix:
+        return ""
+    prefix = prefix.upper()
+    matches = [word for word in dictionary if word.startswith(prefix)]
+    if matches:
+        return max(matches, key=len)
+    return ""
 
-# State
 paragraph = ""
-last_letter = ""
+current_text = ""
+waiting_for_hand_removal = False
+hand_absent_count = 0
+hand_absent_threshold = 2
+last_detected_letter = ""
+stable_count = 0
+stable_threshold = 3
 
-@app.route('/')
+@app.route("/")
 def index():
-    return render_template('index.html')
+    return render_template("index.html")
 
-@app.route('/predict', methods=['POST'])
+@app.route("/predict", methods=["POST"])
 def predict():
-    global paragraph, last_letter
+    global paragraph, current_text, last_detected_letter, stable_count, waiting_for_hand_removal, hand_absent_count
 
-    file = request.files['frame']
-    npimg = np.frombuffer(file.read(), np.uint8)
-    img = cv2.imdecode(npimg, cv2.IMREAD_COLOR)
-    img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-    result = mp_hands.process(img_rgb)
+    data = request.get_json()
+    features = data.get("features", [])
+    hand_present = data.get("hand_present", False)
 
-    if not result.multi_hand_landmarks:
-        return jsonify(letter="", paragraph=paragraph)
+    if waiting_for_hand_removal:
+        if not hand_present:
+            hand_absent_count += 1
+            if hand_absent_count >= hand_absent_threshold:
+                waiting_for_hand_removal = False
+                hand_absent_count = 0
+                last_detected_letter = ""
+        else:
+            hand_absent_count = 0
+        return jsonify(letter="", current=current_text, paragraph=paragraph)
 
-    hand = result.multi_hand_landmarks[0]
-    xs = [lm.x for lm in hand.landmark]
-    ys = [lm.y for lm in hand.landmark]
-    feat = [(lm.x - min(xs), lm.y - min(ys)) for lm in hand.landmark]
-    flat_feat = np.concatenate(feat)
+    if hand_present and len(features) == 42:
+        detected_letter = model.predict([features])[0]
+        if detected_letter == last_detected_letter:
+            stable_count += 1
+        else:
+            last_detected_letter = detected_letter
+            stable_count = 1
+        if stable_count >= stable_threshold:
+            current_text += detected_letter
+            stable_count = 0
+            waiting_for_hand_removal = True
+        predicted = predict_word(current_text)
+        return jsonify(letter=detected_letter, current=current_text, predicted=predicted, paragraph=paragraph)
 
-    pred = model.predict([flat_feat])[0]
+    return jsonify(letter="", current=current_text, paragraph=paragraph)
 
-    if pred != last_letter:
-        paragraph += pred
-        last_letter = pred
-
-    return jsonify(letter=pred, paragraph=paragraph)
-
-@app.route('/predict_word', methods=['GET'])
-def predict_word():
-    partial = request.args.get('partial', '').upper()
-    matches = [w for w in DICTIONARY if w.startswith(partial)]
-    return jsonify(predictions=matches[:3])
-
-@app.route('/backspace', methods=['POST'])
+@app.route("/backspace", methods=["POST"])
 def backspace():
-    global paragraph
-    paragraph = paragraph[:-1]
-    return jsonify(paragraph=paragraph)
+    global current_text, paragraph
+    if current_text:
+        current_text = current_text[:-1]
+    elif paragraph:
+        paragraph = paragraph[:-1]
+    return jsonify(paragraph=paragraph, current=current_text)
 
-@app.route('/space', methods=['POST'])
+@app.route("/space", methods=["POST"])
 def space():
-    global paragraph
-    paragraph += " "
-    return jsonify(paragraph=paragraph)
+    global current_text, paragraph
+    if current_text:
+        paragraph += current_text + " "
+        current_text = ""
+    elif paragraph and not paragraph.endswith(" "):
+        paragraph += " "
+    return jsonify(paragraph=paragraph, current=current_text)
 
-@app.route('/newline', methods=['POST'])
+@app.route("/newline", methods=["POST"])
 def newline():
-    global paragraph
-    paragraph += "\n"
-    return jsonify(paragraph=paragraph)
+    global current_text, paragraph
+    if current_text:
+        paragraph += current_text + "\n"
+        current_text = ""
+    else:
+        paragraph += "\n"
+    return jsonify(paragraph=paragraph, current=current_text)
 
-@app.route('/clear', methods=['POST'])
+@app.route("/clear", methods=["POST"])
 def clear():
-    global paragraph
+    global paragraph, current_text
     paragraph = ""
-    return jsonify(paragraph=paragraph)
+    current_text = ""
+    return jsonify(paragraph="", current="")
 
-@app.route('/correction', methods=['POST'])
+@app.route("/correction", methods=["POST"])
 def correction():
-    global paragraph
-    paragraph = request.form.get('corrected', '')
-    return jsonify(paragraph=paragraph)
+    global paragraph, current_text
+    correction = request.form.get("corrected", "")
+    if correction:
+        dictionary.add(correction.upper())
+        current_text = correction
+    return jsonify(paragraph=paragraph, current=current_text)
 
-@app.route('/speak', methods=['GET'])
+@app.route("/speak", methods=["GET"])
 def speak():
-    tts = gTTS(text=paragraph, lang='en')
-    mp3_fp = io.BytesIO()
-    tts.write_to_fp(mp3_fp)
-    mp3_fp.seek(0)
-    audio_base64 = base64.b64encode(mp3_fp.read()).decode('utf-8')
-    return jsonify(audio=audio_base64)
+    text = paragraph if paragraph else current_text
+    if not text:
+        return jsonify(audio="")
+    tts = gTTS(text=text, lang="en")
+    buf = io.BytesIO()
+    tts.write_to_fp(buf)
+    buf.seek(0)
+    encoded = base64.b64encode(buf.read()).decode()
+    return jsonify(audio=encoded)
 
-if __name__ == '__main__':
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host='0.0.0.0', port=port)
+if __name__ == "__main__":
+    app.run(debug=True)

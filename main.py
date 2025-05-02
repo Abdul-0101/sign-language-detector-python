@@ -1,5 +1,4 @@
 from flask import Flask, request, jsonify, render_template
-import numpy as np
 
 app = Flask(__name__)
 
@@ -10,30 +9,17 @@ def home():
 @app.route('/predict', methods=['POST'])
 def predict():
     try:
-        data = request.get_json(force=True)
-        landmarks = data.get("landmarks", [])
-
-        print("📥 Received landmarks:", landmarks)
-
-        if len(landmarks) != 42:
-            return jsonify({"error": "Invalid number of landmarks"}), 400
-
-        # Dummy prediction — always return "A"
-        letter = "A"
-
+        data = request.get_json()
+        print("✅ Received POST:", data)
         return jsonify({
-            "letter": letter,
+            "letter": "A",
             "confirmed": True,
-            "current_text": letter,
-            "predicted_word": "A"
+            "current_text": "A",
+            "predicted_word": "ARE"
         })
-
     except Exception as e:
-        return jsonify({"error": "Server error", "message": str(e)}), 500
-
-@app.route('/reset', methods=['POST'])
-def reset():
-    return jsonify({"status": "reset"})
+        print("❌ Error:", str(e))
+        return jsonify({"error": "Failed", "message": str(e)}), 500
 
 if __name__ == '__main__':
     app.run(host="0.0.0.0", port=5000)

@@ -1,7 +1,10 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, render_template
 import numpy as np
 import pickle
 import os
+
+# Initialize Flask
+app = Flask(__name__)
 
 # Load model
 with open('model.p', 'rb') as f:
@@ -15,20 +18,23 @@ if os.path.exists(DICTIONARY_FILE):
 else:
     dictionary = set()
 
-app = Flask(__name__)
-
-# Prediction buffer for improved accuracy
+# State variables
 stable_detection_threshold = 3
 stable_count = 0
 last_detected_letter = ""
 current_text = ""
+
+# Routes
+@app.route('/')
+def home():
+    return render_template('index.html')
 
 @app.route('/predict', methods=['POST'])
 def predict():
     global stable_count, last_detected_letter, current_text
 
     data = request.get_json()
-    landmarks = data.get("landmarks")  # List of 42 floats: [x1, y1, x2, y2, ..., x21, y21]
+    landmarks = data.get("landmarks")  # Expecting 42 values (21 x/y pairs)
 
     if not landmarks or len(landmarks) != 42:
         return jsonify({"error": "Invalid landmark data"}), 400
@@ -47,7 +53,6 @@ def predict():
         stable_count = 0
         confirmed = True
 
-    # Predict full word based on current_text prefix
     predicted_word = ""
     prefix = current_text.upper()
     if prefix:

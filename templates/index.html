@@ -1,40 +1,28 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Sign Language Detector</title>
-  <script src="https://cdn.tailwindcss.com"></script>
-</head>
-<body class="bg-gray-100 min-h-screen flex flex-col items-center justify-center">
-  <h1 class="text-3xl font-bold mb-4">🧠 Sign Language Detector</h1>
-
-  <div class="flex flex-col items-center space-y-4">
-    <video id="video" class="rounded shadow-lg" width="640" height="480" autoplay muted></video>
-    <canvas id="canvas" class="absolute top-0 left-0" width="640" height="480"></canvas>
-
-    <div class="bg-white p-4 rounded shadow text-lg w-full max-w-xl">
-      <p><strong>Detected Letter:</strong> <span id="letter">-</span></p>
-      <p><strong>Predicted Word:</strong> <span id="word">-</span></p>
-      <p><strong>Sentence:</strong> <span id="sentence">-</span></p>
-      <p class="text-red-500 mt-2" id="errorMsg"></p>
-    </div>
-  </div>
-
-  <!-- MediaPipe & JS Logic -->
+  <meta charset="UTF-8">
+  <title>Sign Detector Test</title>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.min.js"></script>
+  <style>
+    body { font-family: sans-serif; text-align: center; background: #f9f9f9; }
+    video, canvas { border: 1px solid black; margin-top: 10px; }
+    #output { margin-top: 20px; font-size: 20px; }
+  </style>
+</head>
+<body>
+  <h1>🖐️ Sign Detector (Test Mode)</h1>
+  <video id="video" width="640" height="480" autoplay muted></video>
+  <canvas id="canvas" width="640" height="480"></canvas>
+  <div id="output">Waiting for detection...</div>
 
   <script>
     const video = document.getElementById("video");
     const canvas = document.getElementById("canvas");
     const ctx = canvas.getContext("2d");
-
-    const letterEl = document.getElementById("letter");
-    const wordEl = document.getElementById("word");
-    const sentenceEl = document.getElementById("sentence");
-    const errorMsg = document.getElementById("errorMsg");
+    const output = document.getElementById("output");
 
     const hands = new Hands({
       locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
@@ -42,15 +30,16 @@
 
     hands.setOptions({
       maxNumHands: 1,
-      minDetectionConfidence: 0.85,
-      minTrackingConfidence: 0.85
+      minDetectionConfidence: 0.8,
+      minTrackingConfidence: 0.8
     });
 
     hands.onResults(async (results) => {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       ctx.drawImage(results.image, 0, 0, canvas.width, canvas.height);
 
-      if (!results.multiHandLandmarks || results.multiHandLandmarks.length === 0) {
+      if (results.multiHandLandmarks.length === 0) {
+        output.innerText = "✋ No hand detected.";
         return;
       }
 
@@ -64,26 +53,22 @@
       const minY = Math.min(...ys);
       const normalized = landmarks.flatMap(p => [p.x - minX, p.y - minY]);
 
+      console.log("📤 Sending to /predict:", normalized);
+
       try {
-        const response = await fetch("/predict", {
+        const res = await fetch("/predict", {
           method: "POST",
-          headers: { 'Content-Type': 'application/json' },
+          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ landmarks: normalized })
         });
 
-        const data = await response.json();
-        if (data.error) {
-          errorMsg.textContent = data.error + (data.message ? `: ${data.message}` : "");
-          return;
-        }
+        const data = await res.json();
+        console.log("✅ Response:", data);
 
-        letterEl.textContent = data.letter || "-";
-        wordEl.textContent = data.predicted_word || "-";
-        sentenceEl.textContent = data.current_text || "-";
-        errorMsg.textContent = "";
+        output.innerText = `Letter: ${data.letter}, Word: ${data.predicted_word}, Text: ${data.current_text}`;
       } catch (err) {
-        errorMsg.textContent = "Failed to fetch prediction.";
-        console.error("Fetch error:", err);
+        console.error("❌ Fetch error:", err);
+        output.innerText = "❌ Failed to fetch prediction.";
       }
     });
 

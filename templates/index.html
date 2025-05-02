@@ -14,51 +14,45 @@
   <div id="letter">_</div>
 
   <script type="module">
-  import { Hands }  from 'https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/hands.js';
-  import { Camera } from 'https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils@0.3.1675466862/camera_utils.js';
-    const Camera = CamUtils.Camera;
-    const video = document.getElementById('video');
-    const canvas = document.getElementById('canvas');
-    const ctx = canvas.getContext('2d');
-    const letterDiv = document.getElementById('letter');
+  // ESM builds via jsDelivr; the `?module` suffix gives you real ES exports
+  import { Hands }  from 'https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/hands.js?module';
+  import { Camera } from 'https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils@0.3.1675466862/camera_utils.js?module';  // :contentReference[oaicite:0]{index=0}
+
+  async function supportsSIMD() {
+    try {
+      const resp = await fetch('/hands_solution_simd_wasm_bin.wasm');
+      const buf  = await resp.arrayBuffer();
+      return WebAssembly.validate(buf);
+    } catch {
+      return false;
+    }
+  }
+
+  (async () => {
+    const useSimd = await supportsSIMD();
 
     const hands = new Hands({
-      locateFile: file => `https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1643564452/${file}`
+      locateFile: file => `/${file}`
     });
-    hands.setOptions({ maxNumHands: 1, modelComplexity: 1 });
-    hands.onResults(async results => {
-      ctx.save();
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      ctx.drawImage(results.image, 0, 0);
-      if (results.multiHandLandmarks.length) {
-        const lm = results.multiHandLandmarks[0];
-        // normalize and flatten
-        const xs = lm.map(p => p.x);
-        const ys = lm.map(p => p.y);
-        const minX = Math.min(...xs);
-        const minY = Math.min(...ys);
-        const data = [];
-        for (let i = 0; i < lm.length; i++) {
-          data.push(lm[i].x - minX, lm[i].y - minY);
-        }
-        // send to backend
-        const res = await fetch('/predict', {
-          method: 'POST',
-          headers: {'Content-Type':'application/json'},
-          body: JSON.stringify({ landmarks: data })
-        });
-        const json = await res.json();
-        letterDiv.textContent = json.letter;
-      }
-      ctx.restore();
+    if (!useSimd) {
+      hands.setOptions({ solutionPath: '/hands_solution_wasm_bin.js' });
+    }
+    hands.setOptions({
+      maxNumHands: 1,
+      modelComplexity: 1,
+      minDetectionConfidence: 0.7,
+      minTrackingConfidence: 0.5
     });
+    hands.onResults(onResults);
 
+    const video  = document.getElementById('video');
     const camera = new Camera(video, {
-      onFrame: async () => await hands.send({ image: video }),
-      width: 640,
+      onFrame: async () => { await hands.send({ image: video }); },
+      width:  640,
       height: 480
     });
     camera.start();
-  </script>
+  })();
+</script>
 </body>
 </html>

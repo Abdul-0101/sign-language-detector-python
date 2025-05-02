@@ -1,74 +1,64 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
+  <meta charset="UTF-8">
   <title>Sign Language Detector</title>
   <style>
-    /* your styles here */
+    video, canvas { display: block; margin: auto; }
+    #letter { font-size: 3em; text-align: center; margin-top: 10px; }
   </style>
 </head>
 <body>
-  <video id="input_video" autoplay muted playsinline width="640" height="480"></video>
-  <canvas id="output_canvas" width="640" height="480"></canvas>
+  <video id="video" autoplay playsinline width="640" height="480"></video>
+  <canvas id="canvas" width="640" height="480"></canvas>
+  <div id="letter">_</div>
 
   <script type="module">
-    import { Hands } from "@mediapipe/hands";
-    import { Camera } from "@mediapipe/camera_utils";
+    import { Hands } from 'https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1643564452/hands.js';
+    import { Camera } from 'https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils@0.4.1643564452/camera_utils.js';
 
-    // Helper to check for SIMD support
-    async function supportsSIMD() {
-      if (!WebAssembly.validate) return false;
-      try {
-        const response = await fetch("/hands_solution_simd_wasm_bin.wasm");
-        const buffer = await response.arrayBuffer();
-        return WebAssembly.validate(buffer);
-      } catch {
-        return false;
-      }
-    }
+    const video = document.getElementById('video');
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    const letterDiv = document.getElementById('letter');
 
-    (async () => {
-      const useSimd = await supportsSIMD();
-
-      const hands = new Hands({
-        locateFile: (file) => {
-          // all four files must live in `static/`
-          return `/${file}`;
+    const hands = new Hands({
+      locateFile: file => `https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1643564452/${file}`
+    });
+    hands.setOptions({ maxNumHands: 1, modelComplexity: 1 });
+    hands.onResults(async results => {
+      ctx.save();
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(results.image, 0, 0);
+      if (results.multiHandLandmarks.length) {
+        const lm = results.multiHandLandmarks[0];
+        // normalize and flatten
+        const xs = lm.map(p => p.x);
+        const ys = lm.map(p => p.y);
+        const minX = Math.min(...xs);
+        const minY = Math.min(...ys);
+        const data = [];
+        for (let i = 0; i < lm.length; i++) {
+          data.push(lm[i].x - minX, lm[i].y - minY);
         }
-      });
-
-      // If SIMD isn't supported, point to the fallback build
-      if (!useSimd) {
-        hands.setOptions({
-          solutionPath: "/hands_solution_wasm_bin.js"
+        // send to backend
+        const res = await fetch('/predict', {
+          method: 'POST',
+          headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({ landmarks: data })
         });
+        const json = await res.json();
+        letterDiv.textContent = json.letter;
       }
+      ctx.restore();
+    });
 
-      hands.setOptions({
-        maxNumHands: 1,
-        modelComplexity: 1,
-        minDetectionConfidence: 0.7,
-        minTrackingConfidence: 0.5
-      });
-
-      hands.onResults((results) => {
-        // your onResults handler:
-        const canvas = document.getElementById("output_canvas");
-        const ctx = canvas.getContext("2d");
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        // draw results.multiHandLandmarks, etc.
-      });
-
-      const videoElement = document.getElementById("input_video");
-      const camera = new Camera(videoElement, {
-        onFrame: async () => {
-          await hands.send({ image: videoElement });
-        },
-        width: 640,
-        height: 480
-      });
-      camera.start();
-    })();
+    const camera = new Camera(video, {
+      onFrame: async () => await hands.send({ image: video }),
+      width: 640,
+      height: 480
+    });
+    camera.start();
   </script>
 </body>
 </html>

@@ -1,89 +1,74 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <meta charset="UTF-8" />
   <title>Sign Language Detector</title>
-  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    /* your styles here */
+  </style>
 </head>
-<body class="bg-gray-100 min-h-screen flex flex-col items-center justify-center">
-  <h1 class="text-3xl font-bold mb-4">Sign Language Detector (Test)</h1>
+<body>
+  <video id="input_video" autoplay muted playsinline width="640" height="480"></video>
+  <canvas id="output_canvas" width="640" height="480"></canvas>
 
-  <video id="video" width="640" height="480" autoplay muted class="rounded shadow mb-4"></video>
-  <canvas id="canvas" width="640" height="480" class="absolute top-0 left-0"></canvas>
+  <script type="module">
+    import { Hands } from "@mediapipe/hands";
+    import { Camera } from "@mediapipe/camera_utils";
 
-  <div class="bg-white p-4 rounded shadow text-lg w-full max-w-xl">
-    <p><strong>Detected Letter:</strong> <span id="letter">-</span></p>
-    <p><strong>Predicted Word:</strong> <span id="word">-</span></p>
-    <p><strong>Sentence:</strong> <span id="sentence">-</span></p>
-    <p class="text-red-500 mt-2" id="errorMsg"></p>
-  </div>
-
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.min.js"></script>
-
-  <script>
-    const video = document.getElementById("video");
-    const canvas = document.getElementById("canvas");
-    const ctx = canvas.getContext("2d");
-    const letterEl = document.getElementById("letter");
-    const wordEl = document.getElementById("word");
-    const sentenceEl = document.getElementById("sentence");
-    const errorMsg = document.getElementById("errorMsg");
-
-    const hands = new Hands({
-      locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
-    });
-
-    hands.setOptions({
-      maxNumHands: 1,
-      minDetectionConfidence: 0.8,
-      minTrackingConfidence: 0.8
-    });
-
-    hands.onResults(async (results) => {
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      ctx.drawImage(results.image, 0, 0, canvas.width, canvas.height);
-
-      if (!results.multiHandLandmarks || results.multiHandLandmarks.length === 0) {
-        return;
-      }
-
-      const landmarks = results.multiHandLandmarks[0];
-      drawConnectors(ctx, landmarks, HAND_CONNECTIONS, { color: '#00FF00', lineWidth: 2 });
-      drawLandmarks(ctx, landmarks, { color: '#FF0000', lineWidth: 1 });
-
-      const xs = landmarks.map(p => p.x);
-      const ys = landmarks.map(p => p.y);
-      const minX = Math.min(...xs);
-      const minY = Math.min(...ys);
-      const normalized = landmarks.flatMap(p => [p.x - minX, p.y - minY]);
-
+    // Helper to check for SIMD support
+    async function supportsSIMD() {
+      if (!WebAssembly.validate) return false;
       try {
-        const res = await fetch("/predict", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ landmarks: normalized })
-        });
-        const data = await res.json();
-        letterEl.textContent = data.letter || "-";
-        wordEl.textContent = data.predicted_word || "-";
-        sentenceEl.textContent = data.current_text || "-";
-        errorMsg.textContent = "";
-      } catch (err) {
-        errorMsg.textContent = "❌ Could not reach backend.";
-        console.error(err);
+        const response = await fetch("/hands_solution_simd_wasm_bin.wasm");
+        const buffer = await response.arrayBuffer();
+        return WebAssembly.validate(buffer);
+      } catch {
+        return false;
       }
-    });
+    }
 
-    const camera = new Camera(video, {
-      onFrame: async () => await hands.send({ image: video }),
-      width: 640,
-      height: 480
-    });
+    (async () => {
+      const useSimd = await supportsSIMD();
 
-    camera.start();
+      const hands = new Hands({
+        locateFile: (file) => {
+          // all four files must live in `static/`
+          return `/${file}`;
+        }
+      });
+
+      // If SIMD isn't supported, point to the fallback build
+      if (!useSimd) {
+        hands.setOptions({
+          solutionPath: "/hands_solution_wasm_bin.js"
+        });
+      }
+
+      hands.setOptions({
+        maxNumHands: 1,
+        modelComplexity: 1,
+        minDetectionConfidence: 0.7,
+        minTrackingConfidence: 0.5
+      });
+
+      hands.onResults((results) => {
+        // your onResults handler:
+        const canvas = document.getElementById("output_canvas");
+        const ctx = canvas.getContext("2d");
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        // draw results.multiHandLandmarks, etc.
+      });
+
+      const videoElement = document.getElementById("input_video");
+      const camera = new Camera(videoElement, {
+        onFrame: async () => {
+          await hands.send({ image: videoElement });
+        },
+        width: 640,
+        height: 480
+      });
+      camera.start();
+    })();
   </script>
 </body>
 </html>

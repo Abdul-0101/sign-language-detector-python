@@ -1,34 +1,40 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>Sign Language Detector</title>
-  <style>
-    video, canvas {
-      border: 1px solid black;
-    }
-    #output {
-      font-size: 1.2em;
-      margin-top: 10px;
-    }
-  </style>
+  <script src="https://cdn.tailwindcss.com"></script>
 </head>
-<body>
-  <h2>Live Sign Language Detector</h2>
-  <video id="video" width="640" height="480" autoplay muted></video>
-  <canvas id="canvas" width="640" height="480"></canvas>
-  <div id="output">Letter: -, Word: -, Sentence: -</div>
+<body class="bg-gray-100 min-h-screen flex flex-col items-center justify-center">
+  <h1 class="text-3xl font-bold mb-4">🧠 Sign Language Detector</h1>
 
-  <!-- MediaPipe and Drawing Utils -->
+  <div class="flex flex-col items-center space-y-4">
+    <video id="video" class="rounded shadow-lg" width="640" height="480" autoplay muted></video>
+    <canvas id="canvas" class="absolute top-0 left-0" width="640" height="480"></canvas>
+
+    <div class="bg-white p-4 rounded shadow text-lg w-full max-w-xl">
+      <p><strong>Detected Letter:</strong> <span id="letter">-</span></p>
+      <p><strong>Predicted Word:</strong> <span id="word">-</span></p>
+      <p><strong>Sentence:</strong> <span id="sentence">-</span></p>
+      <p class="text-red-500 mt-2" id="errorMsg"></p>
+    </div>
+  </div>
+
+  <!-- MediaPipe & JS Logic -->
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.min.js"></script>
 
   <script>
-    const videoElement = document.getElementById('video');
-    const canvasElement = document.getElementById('canvas');
-    const canvasCtx = canvasElement.getContext('2d');
-    const outputDiv = document.getElementById('output');
+    const video = document.getElementById("video");
+    const canvas = document.getElementById("canvas");
+    const ctx = canvas.getContext("2d");
+
+    const letterEl = document.getElementById("letter");
+    const wordEl = document.getElementById("word");
+    const sentenceEl = document.getElementById("sentence");
+    const errorMsg = document.getElementById("errorMsg");
 
     const hands = new Hands({
       locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
@@ -36,59 +42,60 @@
 
     hands.setOptions({
       maxNumHands: 1,
-      minDetectionConfidence: 0.8,
-      minTrackingConfidence: 0.8
+      minDetectionConfidence: 0.85,
+      minTrackingConfidence: 0.85
     });
 
-    hands.onResults(onResults);
+    hands.onResults(async (results) => {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(results.image, 0, 0, canvas.width, canvas.height);
 
-    const camera = new Camera(videoElement, {
+      if (!results.multiHandLandmarks || results.multiHandLandmarks.length === 0) {
+        return;
+      }
+
+      const landmarks = results.multiHandLandmarks[0];
+      drawConnectors(ctx, landmarks, HAND_CONNECTIONS, { color: '#00FF00', lineWidth: 2 });
+      drawLandmarks(ctx, landmarks, { color: '#FF0000', lineWidth: 1 });
+
+      const xs = landmarks.map(p => p.x);
+      const ys = landmarks.map(p => p.y);
+      const minX = Math.min(...xs);
+      const minY = Math.min(...ys);
+      const normalized = landmarks.flatMap(p => [p.x - minX, p.y - minY]);
+
+      try {
+        const response = await fetch("/predict", {
+          method: "POST",
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ landmarks: normalized })
+        });
+
+        const data = await response.json();
+        if (data.error) {
+          errorMsg.textContent = data.error + (data.message ? `: ${data.message}` : "");
+          return;
+        }
+
+        letterEl.textContent = data.letter || "-";
+        wordEl.textContent = data.predicted_word || "-";
+        sentenceEl.textContent = data.current_text || "-";
+        errorMsg.textContent = "";
+      } catch (err) {
+        errorMsg.textContent = "Failed to fetch prediction.";
+        console.error("Fetch error:", err);
+      }
+    });
+
+    const camera = new Camera(video, {
       onFrame: async () => {
-        await hands.send({ image: videoElement });
+        await hands.send({ image: video });
       },
       width: 640,
-      height: 480
+      height: 480,
     });
 
     camera.start();
-
-    async function onResults(results) {
-      canvasCtx.save();
-      canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
-      canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
-
-      if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
-        const landmarks = results.multiHandLandmarks[0];
-
-        drawConnectors(canvasCtx, landmarks, HAND_CONNECTIONS, { color: '#00FF00', lineWidth: 2 });
-        drawLandmarks(canvasCtx, landmarks, { color: '#FF0000', lineWidth: 1 });
-
-        const xs = landmarks.map(p => p.x);
-        const ys = landmarks.map(p => p.y);
-        const minX = Math.min(...xs);
-        const minY = Math.min(...ys);
-
-        const normalized = landmarks.flatMap(p => [p.x - minX, p.y - minY]);
-
-        try {
-          const res = await fetch("/predict", {
-            method: "POST",
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ landmarks: normalized })
-          });
-
-          const data = await res.json();
-          const letter = data.letter || '-';
-          const word = data.predicted_word || '-';
-          const sentence = data.current_text || '-';
-          outputDiv.innerText = `Letter: ${letter}, Word: ${word}, Sentence: ${sentence}`;
-        } catch (err) {
-          console.error("API Error:", err);
-        }
-      }
-
-      canvasCtx.restore();
-    }
   </script>
 </body>
 </html>

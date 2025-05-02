@@ -1,2 +1,4 @@
-flask
-gunicorn
+Flask
+numpy
+mediapipe
+scikit-learn

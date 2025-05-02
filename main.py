@@ -1,132 +1,74 @@
-from flask import Flask, request, jsonify, render_template
-import pickle
+from flask import Flask, request, jsonify
 import numpy as np
-from gtts import gTTS
-import base64
-import io
+import pickle
 import os
 
-app = Flask(__name__)
-
-# Load Random Forest model
+# Load model
 with open('model.p', 'rb') as f:
     model = pickle.load(f)['model']
 
 # Load dictionary
-with open('dictionary.txt', 'r') as f:
-    dictionary = set(w.strip().upper() for w in f)
+DICTIONARY_FILE = "dictionary.txt"
+if os.path.exists(DICTIONARY_FILE):
+    with open(DICTIONARY_FILE, "r") as file:
+        dictionary = set(word.strip().upper() for word in file.readlines())
+else:
+    dictionary = set()
 
-# Global state
-paragraph = ''
-current_text = ''
-last_letter = None
+app = Flask(__name__)
+
+# Prediction buffer for improved accuracy
+stable_detection_threshold = 3
 stable_count = 0
-STABLE_THRESHOLD = 5
-waiting_removal = False
-absent_count = 0
-ABSENT_THRESHOLD = 2
-CONFIDENCE_THRESHOLD = 0.85
-
-@app.route('/')
-def index():
-    return render_template('index.html')
+last_detected_letter = ""
+current_text = ""
 
 @app.route('/predict', methods=['POST'])
 def predict():
-    global paragraph, current_text, last_letter, stable_count, waiting_removal, absent_count
+    global stable_count, last_detected_letter, current_text
 
     data = request.get_json()
-    features = data.get('features', [])
-    hand_present = data.get('hand_present', False)
+    landmarks = data.get("landmarks")  # List of 42 floats: [x1, y1, x2, y2, ..., x21, y21]
 
-    if waiting_removal:
-        if not hand_present:
-            absent_count += 1
-            if absent_count >= ABSENT_THRESHOLD:
-                waiting_removal = False
-                absent_count = 0
-                last_letter = None
-        else:
-            absent_count = 0
-        return jsonify(letter='', current=current_text, paragraph=paragraph)
+    if not landmarks or len(landmarks) != 42:
+        return jsonify({"error": "Invalid landmark data"}), 400
 
-    if hand_present and len(features) == 42:
-        proba = model.predict_proba([features])[0]
-        idx = int(np.argmax(proba))
-        confidence = proba[idx]
+    prediction = model.predict([np.array(landmarks)])[0]
 
-        if confidence < CONFIDENCE_THRESHOLD:
-            return jsonify(letter='', current=current_text, paragraph=paragraph)
-
-        if idx == last_letter:
-            stable_count += 1
-        else:
-            last_letter = idx
-            stable_count = 1
-
-        if stable_count >= STABLE_THRESHOLD:
-            letter = chr(65 + idx)
-            current_text += letter
-            stable_count = 0
-            waiting_removal = True
-            return jsonify(letter=letter, current=current_text, paragraph=paragraph)
-
-    return jsonify(letter='', current=current_text, paragraph=paragraph)
-
-@app.route('/backspace', methods=['POST'])
-def backspace():
-    global current_text, paragraph
-    if current_text:
-        current_text = current_text[:-1]
-    elif paragraph:
-        paragraph = paragraph[:-1]
-    return jsonify(current=current_text, paragraph=paragraph)
-
-@app.route('/space', methods=['POST'])
-def space():
-    global current_text, paragraph
-    if current_text:
-        paragraph += current_text + ' '
-        current_text = ''
-    return jsonify(current=current_text, paragraph=paragraph)
-
-@app.route('/newline', methods=['POST'])
-def newline():
-    global current_text, paragraph
-    if current_text:
-        paragraph += current_text + '\n'
-        current_text = ''
+    if prediction == last_detected_letter:
+        stable_count += 1
     else:
-        paragraph += '\n'
-    return jsonify(current=current_text, paragraph=paragraph)
+        stable_count = 1
+        last_detected_letter = prediction
 
-@app.route('/clear', methods=['POST'])
-def clear():
-    global paragraph, current_text
-    paragraph = ''
-    current_text = ''
-    return jsonify(current=current_text, paragraph=paragraph)
+    confirmed = False
+    if stable_count >= stable_detection_threshold:
+        current_text += prediction
+        stable_count = 0
+        confirmed = True
 
-@app.route('/correction', methods=['POST'])
-def correction():
-    global current_text, dictionary
-    corr = request.form.get('corrected', '').upper()
-    if corr:
-        current_text = corr
-        dictionary.add(corr)
-    return jsonify(current=current_text, paragraph=paragraph)
+    # Predict full word based on current_text prefix
+    predicted_word = ""
+    prefix = current_text.upper()
+    if prefix:
+        matches = [word for word in dictionary if word.startswith(prefix)]
+        if matches:
+            predicted_word = max(matches, key=len)
 
-@app.route('/speak', methods=['GET'])
-def speak():
-    text = paragraph if paragraph else current_text
-    if not text:
-        return jsonify(audio='')
-    tts = gTTS(text=text, lang='en')
-    buf = io.BytesIO()
-    tts.write_to_fp(buf)
-    buf.seek(0)
-    return jsonify(audio=base64.b64encode(buf.read()).decode())
+    return jsonify({
+        "letter": prediction,
+        "confirmed": confirmed,
+        "current_text": current_text,
+        "predicted_word": predicted_word
+    })
+
+@app.route('/reset', methods=['POST'])
+def reset():
+    global current_text, last_detected_letter, stable_count
+    current_text = ""
+    last_detected_letter = ""
+    stable_count = 0
+    return jsonify({"status": "reset"})
 
 if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port, debug=True)
+    app.run(debug=True)

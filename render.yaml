@@ -1,7 +1,0 @@
-services:
-  - type: web
-    name: sign-language-web
-    env: python
-    buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn main:app
-    staticPublishPath: ''  # using default

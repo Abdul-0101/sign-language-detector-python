@@ -1,25 +1,27 @@
-from flask import Flask, render_template, request, jsonify
+from flask import Flask, render_template, send_from_directory, request
 
-app = Flask(__name__)
+app = Flask(
+    __name__,
+    static_folder="static",    # <— your JS/.wasm go here
+    static_url_path=""         # <— serve them at “/foo.js” not “/static/foo.js”
+)
 
+# This route serves your index.html from templates/
 @app.route("/")
 def index():
     return render_template("index.html")
 
-@app.route("/predict", methods=["POST"])
-def predict():
-    data = request.get_json()
-    landmarks = data.get("landmarks", [])
-    if len(landmarks) != 42:
-        return jsonify({"error": "Invalid landmark data"}), 400
+# Fallback for any other paths: serve from static/
+@app.route("/<path:filename>")
+def serve_static(filename):
+    return send_from_directory(app.static_folder, filename)
 
-    # Dummy prediction
-    return jsonify({
-        "letter": "A",
-        "confirmed": True,
-        "current_text": "A",
-        "predicted_word": "APPLE"
-    })
+# Ensure .wasm files get the correct MIME type
+@app.after_request
+def add_wasm_header(response):
+    if request.path.endswith(".wasm"):
+        response.headers["Content-Type"] = "application/wasm"
+    return response
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)

@@ -8,7 +8,7 @@
       border: 1px solid black;
     }
     #output {
-      font-size: 1.5em;
+      font-size: 1.2em;
       margin-top: 10px;
     }
   </style>
@@ -52,9 +52,7 @@
 
     async function onResults(results) {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
-      if (results.multiHandLandmarks.length === 0) {
-        return;
-      }
+      if (results.multiHandLandmarks.length === 0) return;
 
       const landmarks = results.multiHandLandmarks[0];
       drawConnectors(ctx, landmarks, Hands.HAND_CONNECTIONS, { color: '#00FF00', lineWidth: 2 });

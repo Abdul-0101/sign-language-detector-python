@@ -19,15 +19,16 @@
   <canvas id="canvas" width="640" height="480"></canvas>
   <div id="output">Letter: -, Word: -, Sentence: -</div>
 
-  <script type="module">
-    import { Hands } from 'https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js';
-    import { drawConnectors, drawLandmarks } from 'https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js';
-    import { Camera } from 'https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js';
+  <!-- MediaPipe and Drawing Utils -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.min.js"></script>
 
-    const video = document.getElementById('video');
-    const canvas = document.getElementById('canvas');
-    const ctx = canvas.getContext('2d');
-    const output = document.getElementById('output');
+  <script>
+    const videoElement = document.getElementById('video');
+    const canvasElement = document.getElementById('canvas');
+    const canvasCtx = canvasElement.getContext('2d');
+    const outputDiv = document.getElementById('output');
 
     const hands = new Hands({
       locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
@@ -41,41 +42,52 @@
 
     hands.onResults(onResults);
 
-    const camera = new Camera(video, {
+    const camera = new Camera(videoElement, {
       onFrame: async () => {
-        await hands.send({ image: video });
+        await hands.send({ image: videoElement });
       },
       width: 640,
       height: 480
     });
+
     camera.start();
 
     async function onResults(results) {
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      if (results.multiHandLandmarks.length === 0) return;
+      canvasCtx.save();
+      canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+      canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
 
-      const landmarks = results.multiHandLandmarks[0];
-      drawConnectors(ctx, landmarks, Hands.HAND_CONNECTIONS, { color: '#00FF00', lineWidth: 2 });
-      drawLandmarks(ctx, landmarks, { color: '#FF0000', lineWidth: 1 });
+      if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+        const landmarks = results.multiHandLandmarks[0];
 
-      const xs = landmarks.map(p => p.x);
-      const ys = landmarks.map(p => p.y);
-      const minX = Math.min(...xs);
-      const minY = Math.min(...ys);
+        drawConnectors(canvasCtx, landmarks, HAND_CONNECTIONS, { color: '#00FF00', lineWidth: 2 });
+        drawLandmarks(canvasCtx, landmarks, { color: '#FF0000', lineWidth: 1 });
 
-      const normalized = landmarks.flatMap(p => [p.x - minX, p.y - minY]);
+        const xs = landmarks.map(p => p.x);
+        const ys = landmarks.map(p => p.y);
+        const minX = Math.min(...xs);
+        const minY = Math.min(...ys);
 
-      const res = await fetch("/predict", {
-        method: "POST",
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ landmarks: normalized })
-      });
+        const normalized = landmarks.flatMap(p => [p.x - minX, p.y - minY]);
 
-      const data = await res.json();
-      const letter = data.letter || '-';
-      const word = data.predicted_word || '-';
-      const sentence = data.current_text || '-';
-      output.innerText = `Letter: ${letter}, Word: ${word}, Sentence: ${sentence}`;
+        try {
+          const res = await fetch("/predict", {
+            method: "POST",
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ landmarks: normalized })
+          });
+
+          const data = await res.json();
+          const letter = data.letter || '-';
+          const word = data.predicted_word || '-';
+          const sentence = data.current_text || '-';
+          outputDiv.innerText = `Letter: ${letter}, Word: ${word}, Sentence: ${sentence}`;
+        } catch (err) {
+          console.error("API Error:", err);
+        }
+      }
+
+      canvasCtx.restore();
     }
   </script>
 </body>

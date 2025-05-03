@@ -5,12 +5,20 @@ from PIL import Image
 from inference_classifier import classify_frame
 
 app = FastAPI()
+
+# ─── CORS ──────────────────────────────────────────────────────────────────────
+# allow your frontend origin (and localhost for local dev)
 app.add_middleware(
-  CORSMiddleware,
-  allow_origins=["*"],
-  allow_methods=["*"],
-  allow_headers=["*"],
+    CORSMiddleware,
+    allow_origins=[
+        "https://sign-language-web-03n4.onrender.com",  # your deployed React
+        "http://localhost:3000",                        # for local dev
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
+# ────────────────────────────────────────────────────────────────────────────────
 
 @app.post("/predict/")
 async def predict(file: UploadFile = File(...)):

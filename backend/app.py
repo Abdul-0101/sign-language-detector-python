@@ -1,38 +1,28 @@
-# app.py
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 import cv2
 import numpy as np
-import base64
-from inference_classifier import classify_frame
+from inference import classify_frame  # Make sure this exists and works
 
 app = FastAPI()
 
-# CORS middleware for local frontend (change if deployed)
+# Enable CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Use your frontend domain in production
+    allow_origins=["*"],  # Change to your frontend domain in production
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 @app.post("/predict/")
-async def predict(request: Request):
-    data = await request.json()
-    frame_data = data.get("frame")
-    if not frame_data:
-        return {"error": "No frame received"}
-
-    # Remove header and decode base64
+async def predict(file: UploadFile = File(...)):
     try:
-        encoded = frame_data.split(",")[1]
-        decoded = base64.b64decode(encoded)
-        np_arr = np.frombuffer(decoded, np.uint8)
-        frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
-    except Exception as e:
-        return {"error": f"Invalid frame data: {str(e)}"}
+        contents = await file.read()
+        npimg = np.frombuffer(contents, np.uint8)
+        frame = cv2.imdecode(npimg, cv2.IMREAD_COLOR)
 
-    # Get prediction from inference logic
-    result = classify_frame(frame)
-    return result
+        result = classify_frame(frame)  # should return {'letter': 'A', 'word': 'APPLE'}
+        return result
+    except Exception as e:
+        return {"error": str(e)}

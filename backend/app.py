@@ -2,7 +2,7 @@ from fastapi import FastAPI, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 import cv2
 import numpy as np
-from inference import classify_frame  # Make sure this exists and works
+from inference_classifier import classify_frame
 
 app = FastAPI()
 

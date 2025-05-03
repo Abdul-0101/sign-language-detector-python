@@ -1,36 +1,41 @@
-
 import React, { useRef, useState, useEffect } from "react";
 import axios from "axios";
+
 export default function App() {
   const videoRef = useRef();
   const [letter, setLetter] = useState("");
   const [word, setWord] = useState("");
+  const backend = process.env.REACT_APP_BACKEND_URL;
 
   const captureAndSend = async () => {
+    if (!videoRef.current) return;
     const canvas = document.createElement("canvas");
     canvas.width = 640; canvas.height = 480;
-    const ctx = canvas.getContext("2d");
-    ctx.drawImage(videoRef.current, 0, 0, 640, 480);
+    canvas.getContext("2d").drawImage(videoRef.current, 0, 0);
     const blob = await new Promise(res => canvas.toBlob(res, "image/jpeg"));
     const form = new FormData();
     form.append("file", blob, "frame.jpg");
-    const resp = await axios.post("https://<YOUR-RENDER‑BACKEND>/infer/", form);
-    setLetter(resp.data.letter);
-    setWord(resp.data.word);
+    try {
+      const resp = await axios.post(`${backend}/infer/`, form);
+      setLetter(resp.data.letter);
+      setWord(resp.data.word);
+    } catch (e) {
+      console.error(e);
+    }
   };
 
   useEffect(() => {
     navigator.mediaDevices.getUserMedia({ video: true })
       .then(stream => { videoRef.current.srcObject = stream; });
-    const interval = setInterval(captureAndSend, 500);
-    return () => clearInterval(interval);
+    const id = setInterval(captureAndSend, 500);
+    return () => clearInterval(id);
   }, []);
 
   return (
-    <div className="p-4">
+    <div style={{ padding: 20 }}>
       <video ref={videoRef} width="640" height="480" autoPlay />
-      <div className="mt-4 text-xl">Letter: {letter}</div>
-      <div className="text-2xl font-bold">Word: {word}</div>
+      <div style={{ marginTop: 10 }}>Letter: <b>{letter}</b></div>
+      <div>Word: <b>{word}</b></div>
     </div>
   );
 }

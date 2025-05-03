@@ -1,3 +1,16 @@
 // frontend/src/reportWebVitals.js
-// simply export an empty function so the import in index.js works
-export default function reportWebVitals() { /* no‑op */ }
+const reportWebVitals = onPerfEntry => {
+  if (onPerfEntry && onPerfEntry instanceof Function) {
+    import('web-vitals')                // dynamic import()!
+      .then(({ getCLS, getFID, getFCP, getLCP, getTTFB }) => {
+        getCLS(onPerfEntry);
+        getFID(onPerfEntry);
+        getFCP(onPerfEntry);
+        getLCP(onPerfEntry);
+        getTTFB(onPerfEntry);
+      })
+      .catch(console.error);
+  }
+};
+
+export default reportWebVitals;

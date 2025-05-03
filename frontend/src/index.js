@@ -12,5 +12,5 @@
    </React.StrictMode>
  );
 
-+// If you want to measure performance:
-+reportWebVitals();
+reportWebVitals();
+

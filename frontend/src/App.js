@@ -1,57 +1,57 @@
 import React, { useEffect, useRef, useState } from "react";
 import Webcam from "react-webcam";
 import axios from "axios";
+import "./App.css";
 
-const App = () => {
-  const webcamRef = useRef(null);
-  const [predictedLetter, setPredictedLetter] = useState("");
-  const [predictedWord, setPredictedWord] = useState("");
+export default function App() {
+  const webcamRef = useRef();
+  const [letter, setLetter] = useState("");
+  const [word, setWord] = useState("");
 
-  const captureFrame = async () => {
-    if (webcamRef.current) {
-      const screenshot = webcamRef.current.getScreenshot();
-      if (screenshot) {
-        const blob = await fetch(screenshot).then(res => res.blob());
-        const formData = new FormData();
-        formData.append("file", blob, "frame.jpg");
+  // capture & send
+  const capture = async () => {
+    if (!webcamRef.current) return;
+    const img = webcamRef.current.getScreenshot();
+    const blob = await fetch(img).then(r => r.blob());
+    const fd = new FormData();
+    fd.append("file", blob, "frame.jpg");
 
-        try {
-          const response = await axios.post("https://sign-language-web.onrender.com/predict/", formData, {
-            headers: { "Content-Type": "multipart/form-data" },
-          });
-          setPredictedLetter(response.data.letter || "");
-          setPredictedWord(response.data.word || "");
-        } catch (error) {
-          console.error("Prediction failed:", error);
-        }
-      }
+    try {
+      const res = await axios.post(
+        "https://sign-language-web.onrender.com/predict/",
+        fd,
+        { headers: { "Content-Type": "multipart/form-data" } }
+      );
+      setLetter(res.data.letter);
+      setWord(res.data.word);
+    } catch (e) {
+      console.error(e);
     }
   };
 
   useEffect(() => {
-    const interval = setInterval(() => {
-      captureFrame();
-    }, 1000); // Every second
-    return () => clearInterval(interval);
+    const id = setInterval(capture, 500);
+    return () => clearInterval(id);
   }, []);
 
   return (
-    <div style={{ textAlign: "center", marginTop: "20px" }}>
-      <h1>Sign Language Detection</h1>
-      <Webcam
-        audio={false}
-        ref={webcamRef}
-        screenshotFormat="image/jpeg"
-        width={400}
-        height={300}
-        style={{ border: "2px solid black" }}
-      />
-      <div style={{ marginTop: "20px" }}>
-        <h2>Predicted Letter: {predictedLetter}</h2>
-        <h2>Predicted Word: {predictedWord}</h2>
+    <div className="container">
+      <div className="video-panel">
+        <Webcam
+          audio={false}
+          ref={webcamRef}
+          screenshotFormat="image/jpeg"
+          className="video"
+        />
+        <div className="overlay">
+          <div className="detected">Detected: {letter || "-"}</div>
+          {letter && <div className="remove">Remove hand to detect next letter</div>}
+        </div>
+      </div>
+      <div className="output-panel">
+        <h3>Current Word: {word.charAt(0) || "-"}</h3>
+        <h3>Predicted Word: {word || "-"}</h3>
       </div>
     </div>
   );
-};
-
-export default App;
+}

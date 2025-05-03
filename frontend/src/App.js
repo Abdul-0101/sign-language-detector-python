@@ -1,59 +1,57 @@
-import React, { useRef, useEffect, useState } from "react";
-import "./App.css";
+import React, { useEffect, useRef, useState } from "react";
+import Webcam from "react-webcam";
+import axios from "axios";
 
-function App() {
-  const videoRef = useRef(null);
-  const [prediction, setPrediction] = useState({ letter: "", word: "" });
+const App = () => {
+  const webcamRef = useRef(null);
+  const [predictedLetter, setPredictedLetter] = useState("");
+  const [predictedWord, setPredictedWord] = useState("");
 
-  useEffect(() => {
-    const startCamera = async () => {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: true });
-      if (videoRef.current) videoRef.current.srcObject = stream;
-    };
-    startCamera();
-  }, []);
+  const captureFrame = async () => {
+    if (webcamRef.current) {
+      const screenshot = webcamRef.current.getScreenshot();
+      if (screenshot) {
+        const blob = await fetch(screenshot).then(res => res.blob());
+        const formData = new FormData();
+        formData.append("file", blob, "frame.jpg");
 
-  useEffect(() => {
-    const interval = setInterval(captureAndSendFrame, 1000); // Adjust frequency here
-    return () => clearInterval(interval);
-  }, []);
-
-  const captureAndSendFrame = async () => {
-    const video = videoRef.current;
-    if (!video) return;
-
-    const canvas = document.createElement("canvas");
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
-
-    const ctx = canvas.getContext("2d");
-    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-    const dataURL = canvas.toDataURL("image/jpeg");
-
-    try {
-      const response = await fetch("http://localhost:8000/predict/", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ frame: dataURL }),
-      });
-
-      const result = await response.json();
-      setPrediction(result);
-    } catch (error) {
-      console.error("Error sending frame:", error);
+        try {
+          const response = await axios.post("http://localhost:8000/predict/", formData, {
+            headers: { "Content-Type": "multipart/form-data" },
+          });
+          setPredictedLetter(response.data.letter || "");
+          setPredictedWord(response.data.word || "");
+        } catch (error) {
+          console.error("Prediction failed:", error);
+        }
+      }
     }
   };
 
+  useEffect(() => {
+    const interval = setInterval(() => {
+      captureFrame();
+    }, 1000); // Every second
+    return () => clearInterval(interval);
+  }, []);
+
   return (
-    <div className="App">
-      <h1>Sign Language Detector</h1>
-      <video ref={videoRef} autoPlay playsInline className="video" />
-      <div className="output">
-        <h2>Letter: {prediction.letter || "-"}</h2>
-        <h2>Word: {prediction.word || "-"}</h2>
+    <div style={{ textAlign: "center", marginTop: "20px" }}>
+      <h1>Sign Language Detection</h1>
+      <Webcam
+        audio={false}
+        ref={webcamRef}
+        screenshotFormat="image/jpeg"
+        width={400}
+        height={300}
+        style={{ border: "2px solid black" }}
+      />
+      <div style={{ marginTop: "20px" }}>
+        <h2>Predicted Letter: {predictedLetter}</h2>
+        <h2>Predicted Word: {predictedWord}</h2>
       </div>
     </div>
   );
-}
+};
 
 export default App;
